@@ -61,7 +61,7 @@ export const ENEMY_BASE_SPEEDS: Readonly<Record<EnemyType, number>> = {
   PONTAN: 1.125,
 };
 
-export const ONEAL_BURST_SPEED = 0.75;
+export const ONEAL_BURST_SPEED = 0.65;
 
 /**
  * Wallpass ability (can walk through destructible soft blocks)
@@ -104,6 +104,8 @@ export interface EnemyEntity {
   deathTimerMs: number;
   scoreAwarded?: number;
   spawnImmunityMs: number;
+  tilesWalkedInCurrentDir: number;
+  reversalQuota: number;
 }
 
 /**
@@ -123,6 +125,8 @@ export interface EnemySnapshot {
   readonly deathTimerMs: number;
   readonly scoreAwarded?: number;
   readonly spawnImmunityMs: number;
+  readonly tilesWalkedInCurrentDir: number;
+  readonly reversalQuota: number;
 }
 
 /**
@@ -152,8 +156,60 @@ export interface IEnemiesEngine {
     type: EnemyType,
     tx: number,
     ty: number,
-    grid: IStageGridEngine
+    grid: IStageGridEngine,
+    rng?: () => number
   ): EnemyEntity | null;
+
+  /**
+   * Generates a random reversal quota for the enemy archetype.
+   */
+  getRandomReversalQuota(type: EnemyType, rng?: () => number): number;
+
+  /**
+   * Selects an initial movement direction with 50/50 balance between horizontal and vertical axes.
+   */
+  chooseInitialDirection(
+    tx: number,
+    ty: number,
+    hasWallpass: boolean,
+    grid: IStageGridEngine,
+    rng?: () => number
+  ): EnemyDirection;
+
+  /**
+   * Evaluates and updates an enemy's direction at a tile intersection according to NES 1985 rules.
+   */
+  evaluateDecisionAtTile(
+    enemy: EnemyEntity,
+    playerTile: { x: number; y: number },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine,
+    rng?: () => number
+  ): void;
+
+  /**
+   * Checks unblocked straight line of sight between an enemy and a target tile within 8 tiles.
+   */
+  hasLineOfSight(
+    tx: number,
+    ty: number,
+    targetTx: number,
+    targetTy: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
+
+  /**
+   * Checks whether a tile is passable for an enemy entity.
+   */
+  canEnemyPassTile(
+    tx: number,
+    ty: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
 
   /**
    * Returns the authentic enemy distribution roster for a stage.

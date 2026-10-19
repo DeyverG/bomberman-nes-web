@@ -93,6 +93,11 @@ export class EnemiesEngine implements IEnemiesEngine {
   private _enemies: EnemyEntity[] = [];
   private enemyIdCounter = 0;
   private explosionKills = new Map<number, number>();
+  private readonly defaultRng: () => number;
+
+  constructor(rng: () => number = Math.random) {
+    this.defaultRng = rng;
+  }
 
   public get activeEnemies(): readonly EnemyEntity[] {
     return this._enemies;
@@ -117,6 +122,59 @@ export class EnemiesEngine implements IEnemiesEngine {
     this.explosionKills.clear();
   }
 
+  public getRandomReversalQuota(type: EnemyType, rng: () => number = this.defaultRng): number {
+    if (type === 'DAHL') {
+      return Math.floor(rng() * 3) + 2; // 2..4
+    }
+    if (type === 'OVAPE') {
+      return Math.floor(rng() * 4) + 3; // 3..6
+    }
+    return Math.floor(rng() * 5) + 2; // 2..6
+  }
+
+  public setEnemyDirection(
+    enemy: EnemyEntity,
+    newDir: EnemyDirection,
+    rng: () => number = this.defaultRng
+  ): void {
+    if (enemy.direction !== newDir) {
+      enemy.direction = newDir;
+      enemy.tilesWalkedInCurrentDir = 0;
+      enemy.reversalQuota = this.getRandomReversalQuota(enemy.type, rng);
+    }
+  }
+
+  public chooseInitialDirection(
+    tx: number,
+    ty: number,
+    hasWallpass: boolean,
+    grid: IStageGridEngine,
+    rng: () => number = this.defaultRng
+  ): EnemyDirection {
+    const dummyEnemy = { hasWallpass };
+    const hDirs: EnemyDirection[] = [];
+    const vDirs: EnemyDirection[] = [];
+
+    if (this.canEnemyPassTile(tx - 1, ty, dummyEnemy, grid)) hDirs.push('LEFT');
+    if (this.canEnemyPassTile(tx + 1, ty, dummyEnemy, grid)) hDirs.push('RIGHT');
+    if (this.canEnemyPassTile(tx, ty - 1, dummyEnemy, grid)) vDirs.push('UP');
+    if (this.canEnemyPassTile(tx, ty + 1, dummyEnemy, grid)) vDirs.push('DOWN');
+
+    if (hDirs.length > 0 && vDirs.length > 0) {
+      if (rng() < 0.5) {
+        return hDirs[Math.floor(rng() * hDirs.length)];
+      } else {
+        return vDirs[Math.floor(rng() * vDirs.length)];
+      }
+    } else if (hDirs.length > 0) {
+      return hDirs[Math.floor(rng() * hDirs.length)];
+    } else if (vDirs.length > 0) {
+      return vDirs[Math.floor(rng() * vDirs.length)];
+    }
+
+    return 'RIGHT';
+  }
+
   public getStageEnemyRoster(stage: number): readonly EnemyType[] {
     const s = Math.max(1, Math.floor(stage));
     if (s in STAGE_ENEMY_ROSTERS) {
@@ -129,7 +187,8 @@ export class EnemiesEngine implements IEnemiesEngine {
     type: EnemyType,
     tx: number,
     ty: number,
-    grid: IStageGridEngine
+    grid: IStageGridEngine,
+    rng: () => number = this.defaultRng
   ): EnemyEntity | null {
     // 1. Safe spawn exclusion zone: Manhattan distance < 5 from player spawn (1, 1)
     const dist = Math.abs(tx - 1) + Math.abs(ty - 1);
@@ -168,18 +227,22 @@ export class EnemiesEngine implements IEnemiesEngine {
       }
     }
 
+    const initialDir = this.chooseInitialDirection(tx, ty, hasWallpass, grid, rng);
+
     const enemy: EnemyEntity = {
       id: ++this.enemyIdCounter,
       type,
       x: tx * 16.0,
       y: ty * 16.0,
-      direction: 'RIGHT',
+      direction: initialDir,
       state: 'ALIVE',
       speed: ENEMY_BASE_SPEEDS[type],
       hasWallpass,
       baseScore: ENEMY_BASE_SCORES[type],
       deathTimerMs: 0,
       spawnImmunityMs: 0,
+      tilesWalkedInCurrentDir: 0,
+      reversalQuota: this.getRandomReversalQuota(type, rng),
     };
 
     this._enemies.push(enemy);
@@ -247,11 +310,11 @@ export class EnemiesEngine implements IEnemiesEngine {
         const tile = grid.getTile(x, y);
 
         if (!hasWallpass && tile === TileType.EMPTY) {
-          this.spawnEnemy(enemyType, x, y, grid);
+          this.spawnEnemy(enemyType, x, y, grid, rng);
           spawned = true;
           break;
         } else if (hasWallpass && (tile === TileType.EMPTY || tile === TileType.SOFT_BLOCK)) {
-          this.spawnEnemy(enemyType, x, y, grid);
+          this.spawnEnemy(enemyType, x, y, grid, rng);
           spawned = true;
           break;
         }
@@ -263,7 +326,7 @@ export class EnemiesEngine implements IEnemiesEngine {
           const { x, y } = candidates[k];
           const tile = grid.getTile(x, y);
           if (tile === TileType.EMPTY || (hasWallpass && tile === TileType.SOFT_BLOCK)) {
-            this.spawnEnemy(enemyType, x, y, grid);
+            this.spawnEnemy(enemyType, x, y, grid, rng);
             break;
           }
         }
@@ -374,6 +437,8 @@ export class EnemiesEngine implements IEnemiesEngine {
         baseScore: ENEMY_BASE_SCORES.PONTAN,
         deathTimerMs: 0,
         spawnImmunityMs: 0,
+        tilesWalkedInCurrentDir: 0,
+        reversalQuota: this.getRandomReversalQuota('PONTAN', rng),
       };
 
       this._enemies.push(pontan);
@@ -422,6 +487,8 @@ export class EnemiesEngine implements IEnemiesEngine {
         baseScore: ENEMY_BASE_SCORES[enemyType],
         deathTimerMs: 0,
         spawnImmunityMs: 520,
+        tilesWalkedInCurrentDir: 0,
+        reversalQuota: this.getRandomReversalQuota(enemyType, rng),
       };
 
       this._enemies.push(enemy);
@@ -477,7 +544,7 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTy = Math.round(enemy.y / 16);
       if (ordinance.isBombAt(targetTx, targetTy)) {
         enemy.x = Math.floor(enemy.x / 16) * 16.0;
-        enemy.direction = 'LEFT';
+        this.setEnemyDirection(enemy, 'LEFT', this.defaultRng);
         return;
       }
     } else if (enemy.direction === 'LEFT') {
@@ -485,7 +552,7 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTy = Math.round(enemy.y / 16);
       if (ordinance.isBombAt(targetTx, targetTy)) {
         enemy.x = Math.ceil(enemy.x / 16) * 16.0;
-        enemy.direction = 'RIGHT';
+        this.setEnemyDirection(enemy, 'RIGHT', this.defaultRng);
         return;
       }
     } else if (enemy.direction === 'DOWN') {
@@ -493,7 +560,7 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTy = Math.floor(enemy.y / 16) + 1;
       if (ordinance.isBombAt(targetTx, targetTy)) {
         enemy.y = Math.floor(enemy.y / 16) * 16.0;
-        enemy.direction = 'UP';
+        this.setEnemyDirection(enemy, 'UP', this.defaultRng);
         return;
       }
     } else if (enemy.direction === 'UP') {
@@ -501,8 +568,19 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTy = Math.ceil(enemy.y / 16) - 1;
       if (ordinance.isBombAt(targetTx, targetTy)) {
         enemy.y = Math.ceil(enemy.y / 16) * 16.0;
-        enemy.direction = 'DOWN';
+        this.setEnemyDirection(enemy, 'DOWN', this.defaultRng);
         return;
+      }
+    }
+
+    // Mid-corridor line of sight check for ONEAL
+    if (enemy.type === 'ONEAL') {
+      const curTx = Math.round(enemy.x / 16);
+      const curTy = Math.round(enemy.y / 16);
+      if (this.hasLineOfSight(curTx, curTy, playerTile.x, playerTile.y, enemy, grid, ordinance)) {
+        enemy.speed = ONEAL_BURST_SPEED;
+      } else {
+        enemy.speed = ENEMY_BASE_SPEEDS.ONEAL;
       }
     }
 
@@ -536,6 +614,7 @@ export class EnemiesEngine implements IEnemiesEngine {
 
       if (speed >= dist - 0.0001) {
         enemy.x = targetX;
+        enemy.tilesWalkedInCurrentDir++;
         this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.x += speed;
@@ -547,6 +626,7 @@ export class EnemiesEngine implements IEnemiesEngine {
 
       if (speed >= dist - 0.0001) {
         enemy.x = targetX;
+        enemy.tilesWalkedInCurrentDir++;
         this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.x -= speed;
@@ -558,6 +638,7 @@ export class EnemiesEngine implements IEnemiesEngine {
 
       if (speed >= dist - 0.0001) {
         enemy.y = targetY;
+        enemy.tilesWalkedInCurrentDir++;
         this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.y += speed;
@@ -569,6 +650,7 @@ export class EnemiesEngine implements IEnemiesEngine {
 
       if (speed >= dist - 0.0001) {
         enemy.y = targetY;
+        enemy.tilesWalkedInCurrentDir++;
         this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.y -= speed;
@@ -579,16 +661,16 @@ export class EnemiesEngine implements IEnemiesEngine {
   public canEnemyPassTile(
     tx: number,
     ty: number,
-    enemy: EnemyEntity,
+    enemy: { hasWallpass: boolean },
     grid: IStageGridEngine,
-    ordinance: IOrdinanceEngine
+    ordinance?: IOrdinanceEngine
   ): boolean {
     if (!grid.isInBounds(tx, ty)) return false;
     const tile = grid.getTile(tx, ty);
     if (tile === TileType.HARD_WALL) return false;
 
     // Solid bomb check
-    if (ordinance.isBombAt(tx, ty)) return false;
+    if (ordinance && ordinance.isBombAt(tx, ty)) return false;
 
     if (!enemy.hasWallpass) {
       if (
@@ -604,95 +686,391 @@ export class EnemiesEngine implements IEnemiesEngine {
     return true;
   }
 
+  public hasLineOfSight(
+    tx: number,
+    ty: number,
+    targetTx: number,
+    targetTy: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean {
+    if (ty === targetTy) {
+      const minX = Math.min(tx, targetTx);
+      const maxX = Math.max(tx, targetTx);
+      if (maxX - minX > 8) return false;
+      for (let x = minX + 1; x < maxX; x++) {
+        if (!this.canEnemyPassTile(x, ty, enemy, grid, ordinance)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    if (tx === targetTx) {
+      const minY = Math.min(ty, targetTy);
+      const maxY = Math.max(ty, targetTy);
+      if (maxY - minY > 8) return false;
+      for (let y = minY + 1; y < maxY; y++) {
+        if (!this.canEnemyPassTile(tx, y, enemy, grid, ordinance)) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  public getDirectionMinimizingDistance(
+    fromTx: number,
+    fromTy: number,
+    candidateDirs: EnemyDirection[],
+    targetTile: { x: number; y: number },
+    rng: () => number = this.defaultRng
+  ): EnemyDirection {
+    if (candidateDirs.length === 0) return 'RIGHT';
+    if (candidateDirs.length === 1) return candidateDirs[0];
+
+    let bestDist = Infinity;
+    let bestDirs: EnemyDirection[] = [];
+
+    for (const d of candidateDirs) {
+      const nextX = fromTx + this.dirX(d);
+      const nextY = fromTy + this.dirY(d);
+      const dist = Math.abs(nextX - targetTile.x) + Math.abs(nextY - targetTile.y);
+
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestDirs = [d];
+      } else if (dist === bestDist) {
+        bestDirs.push(d);
+      }
+    }
+
+    if (bestDirs.length === 1) return bestDirs[0];
+    return bestDirs[Math.floor(rng() * bestDirs.length)];
+  }
+
+  public evaluateDecisionAtTile(
+    enemy: EnemyEntity,
+    playerTile: { x: number; y: number },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine,
+    rng: () => number = this.defaultRng
+  ): void {
+    const tx = Math.round(enemy.x / 16);
+    const ty = Math.round(enemy.y / 16);
+
+    const canPass = (dir: EnemyDirection) =>
+      this.canEnemyPassTile(tx + this.dirX(dir), ty + this.dirY(dir), enemy, grid, ordinance);
+
+    const forward = enemy.direction;
+    const reverse = this.getOppositeDirection(forward);
+    const [perp1, perp2] = this.getPerpendicularDirections(forward);
+
+    const isForwardOpen = canPass(forward);
+    const openPerps: EnemyDirection[] = [];
+    if (canPass(perp1)) openPerps.push(perp1);
+    if (canPass(perp2)) openPerps.push(perp2);
+    const isReverseOpen = canPass(reverse);
+
+    const dist = (dir: EnemyDirection) =>
+      Math.abs(tx + this.dirX(dir) - playerTile.x) + Math.abs(ty + this.dirY(dir) - playerTile.y);
+    const currentDist = Math.abs(tx - playerTile.x) + Math.abs(ty - playerTile.y);
+
+    // 1. BALLOM: Orange balloon (0.375 px/tick, wallpass: false)
+    if (enemy.type === 'BALLOM') {
+      if (isForwardOpen) {
+        if (enemy.tilesWalkedInCurrentDir >= 3 && openPerps.length > 0) {
+          if (rng() < 0.2) {
+            const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+            this.setEnemyDirection(enemy, chosen, rng);
+            return;
+          }
+        }
+        return;
+      }
+
+      // Hit obstacle
+      if (openPerps.length > 0 && isReverseOpen) {
+        if (rng() < 0.5) {
+          const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+          this.setEnemyDirection(enemy, chosen, rng);
+        } else {
+          this.setEnemyDirection(enemy, reverse, rng);
+        }
+        return;
+      } else if (openPerps.length > 0) {
+        const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+        this.setEnemyDirection(enemy, chosen, rng);
+        return;
+      } else if (isReverseOpen) {
+        this.setEnemyDirection(enemy, reverse, rng);
+        return;
+      }
+      return;
+    }
+
+    // 2. ONEAL: Blue onion (0.5 px/tick base / 0.65 burst, wallpass: false)
+    if (enemy.type === 'ONEAL') {
+      const hasLos = this.hasLineOfSight(tx, ty, playerTile.x, playerTile.y, enemy, grid, ordinance);
+      if (hasLos) {
+        enemy.speed = ONEAL_BURST_SPEED;
+        let dirToPlayer: EnemyDirection | null = null;
+        if (ty === playerTile.y) {
+          dirToPlayer = playerTile.x > tx ? 'RIGHT' : 'LEFT';
+        } else if (tx === playerTile.x) {
+          dirToPlayer = playerTile.y > ty ? 'DOWN' : 'UP';
+        }
+        if (dirToPlayer && canPass(dirToPlayer)) {
+          this.setEnemyDirection(enemy, dirToPlayer, rng);
+          return;
+        }
+      } else {
+        enemy.speed = ENEMY_BASE_SPEEDS.ONEAL;
+      }
+
+      const manhattanDist = Math.abs(tx - playerTile.x) + Math.abs(ty - playerTile.y);
+
+      // If near Bomberman (<= 7 tiles), 65% chance to choose axis approaching Bomberman
+      if (manhattanDist <= 7 && rng() < 0.65) {
+        const available: EnemyDirection[] = [];
+        if (isForwardOpen) available.push(forward);
+        for (const p of openPerps) available.push(p);
+        if (!isForwardOpen && isReverseOpen) available.push(reverse);
+
+        const closer = available.filter((d) => dist(d) < manhattanDist);
+        if (closer.length > 0) {
+          const chosen = this.getDirectionMinimizingDistance(tx, ty, closer, playerTile, rng);
+          this.setEnemyDirection(enemy, chosen, rng);
+          return;
+        }
+      }
+
+      if (isForwardOpen) {
+        if (enemy.tilesWalkedInCurrentDir >= enemy.reversalQuota) {
+          if (rng() < 0.45) {
+            const closerPerp = openPerps.find((p) => dist(p) < manhattanDist);
+            if (closerPerp) {
+              this.setEnemyDirection(enemy, closerPerp, rng);
+            } else if (isReverseOpen) {
+              this.setEnemyDirection(enemy, reverse, rng);
+            }
+            return;
+          }
+        }
+        return;
+      }
+
+      // Hit obstacle
+      const options: EnemyDirection[] = [...openPerps];
+      if (isReverseOpen) options.push(reverse);
+
+      if (options.length > 0) {
+        if (manhattanDist <= 7 && rng() < 0.65) {
+          const chosen = this.getDirectionMinimizingDistance(tx, ty, options, playerTile, rng);
+          this.setEnemyDirection(enemy, chosen, rng);
+        } else {
+          if (openPerps.length > 0 && isReverseOpen) {
+            if (rng() < 0.5) {
+              const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+              this.setEnemyDirection(enemy, chosen, rng);
+            } else {
+              this.setEnemyDirection(enemy, reverse, rng);
+            }
+          } else {
+            const chosen = options[Math.floor(rng() * options.length)];
+            this.setEnemyDirection(enemy, chosen, rng);
+          }
+        }
+      }
+      return;
+    }
+
+    // 3. DAHL: Red barrel (0.625 px/tick, wallpass: false)
+    if (enemy.type === 'DAHL') {
+      if (isForwardOpen) {
+        if (enemy.tilesWalkedInCurrentDir >= enemy.reversalQuota) {
+          const roll = rng();
+          if (roll < 0.7 && openPerps.length > 0) {
+            const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+            this.setEnemyDirection(enemy, chosen, rng);
+            return;
+          } else if (roll < 0.95 && isReverseOpen) {
+            this.setEnemyDirection(enemy, reverse, rng);
+            return;
+          }
+          // 5% continue forward
+          return;
+        }
+        return;
+      }
+
+      // Hit obstacle
+      if (openPerps.length > 0 && isReverseOpen) {
+        const roll = rng();
+        if (roll < 0.7) {
+          const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+          this.setEnemyDirection(enemy, chosen, rng);
+        } else {
+          this.setEnemyDirection(enemy, reverse, rng);
+        }
+        return;
+      } else if (openPerps.length > 0) {
+        const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+        this.setEnemyDirection(enemy, chosen, rng);
+        return;
+      } else if (isReverseOpen) {
+        this.setEnemyDirection(enemy, reverse, rng);
+        return;
+      }
+      return;
+    }
+
+    // 4. MINVO: Agile green face (0.75 px/tick, wallpass: false)
+    if (enemy.type === 'MINVO') {
+      const isMovingAway =
+        (forward === 'RIGHT' && playerTile.x < tx) ||
+        (forward === 'LEFT' && playerTile.x > tx) ||
+        (forward === 'DOWN' && playerTile.y < ty) ||
+        (forward === 'UP' && playerTile.y > ty);
+
+      if (isMovingAway && enemy.tilesWalkedInCurrentDir >= 2 && isReverseOpen) {
+        if (rng() < 0.75) {
+          this.setEnemyDirection(enemy, reverse, rng);
+          return;
+        }
+      }
+
+      const openForwardAndPerps: EnemyDirection[] = [];
+      if (isForwardOpen) openForwardAndPerps.push(forward);
+      for (const p of openPerps) openForwardAndPerps.push(p);
+
+      const closerDirs = openForwardAndPerps.filter((d) => dist(d) < currentDist);
+
+      if (closerDirs.length > 0) {
+        if (rng() < 0.8) {
+          const chosen = this.getDirectionMinimizingDistance(tx, ty, closerDirs, playerTile, rng);
+          this.setEnemyDirection(enemy, chosen, rng);
+          return;
+        }
+      }
+
+      if (isForwardOpen) {
+        return;
+      }
+
+      // Obstacle ahead
+      const fallbackOptions: EnemyDirection[] = [...openPerps];
+      if (isReverseOpen) fallbackOptions.push(reverse);
+
+      if (fallbackOptions.length > 0) {
+        const chosen = this.getDirectionMinimizingDistance(tx, ty, fallbackOptions, playerTile, rng);
+        this.setEnemyDirection(enemy, chosen, rng);
+      }
+      return;
+    }
+
+    // 5. KONDORIA: Slow ghost amoeba (0.25 px/tick, wallpass: true)
+    if (enemy.type === 'KONDORIA') {
+      const isOddIntersection = tx % 2 !== 0 && ty % 2 !== 0;
+      const reachedQuota = enemy.tilesWalkedInCurrentDir >= enemy.reversalQuota;
+
+      if (isOddIntersection || reachedQuota || !isForwardOpen) {
+        const allDirs: EnemyDirection[] = ['UP', 'DOWN', 'LEFT', 'RIGHT'];
+        const passableDirs = allDirs.filter((d) => canPass(d));
+
+        if (passableDirs.length > 0) {
+          if (rng() < 0.85 || !isForwardOpen) {
+            const chosen = this.getDirectionMinimizingDistance(tx, ty, passableDirs, playerTile, rng);
+            this.setEnemyDirection(enemy, chosen, rng);
+            return;
+          }
+        }
+      }
+
+      if (isForwardOpen) {
+        return;
+      }
+      return;
+    }
+
+    // 6. OVAPE: Wandering ghost (0.375 px/tick, wallpass: true)
+    if (enemy.type === 'OVAPE') {
+      if (isForwardOpen) {
+        if (enemy.tilesWalkedInCurrentDir >= enemy.reversalQuota) {
+          const roll = rng();
+          if (roll < 0.3 && isReverseOpen) {
+            this.setEnemyDirection(enemy, reverse, rng);
+            return;
+          } else if (roll < 0.65 && openPerps.length > 0) {
+            const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+            this.setEnemyDirection(enemy, chosen, rng);
+            return;
+          }
+          // 35% continue forward
+          return;
+        }
+        return;
+      }
+
+      // Hit HARD_WALL or map boundary
+      if (openPerps.length > 0 && isReverseOpen) {
+        if (rng() < 0.5) {
+          const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+          this.setEnemyDirection(enemy, chosen, rng);
+        } else {
+          this.setEnemyDirection(enemy, reverse, rng);
+        }
+        return;
+      } else if (openPerps.length > 0) {
+        const chosen = openPerps[Math.floor(rng() * openPerps.length)];
+        this.setEnemyDirection(enemy, chosen, rng);
+        return;
+      } else if (isReverseOpen) {
+        this.setEnemyDirection(enemy, reverse, rng);
+        return;
+      }
+      return;
+    }
+
+    // 7 & 8. PASS & PONTAN: Elite Chasers
+    if (enemy.type === 'PASS' || enemy.type === 'PONTAN') {
+      const isBehind = dist(reverse) < currentDist;
+
+      if (isBehind && isReverseOpen && rng() < 0.9) {
+        this.setEnemyDirection(enemy, reverse, rng);
+        return;
+      }
+
+      const availableDirs: EnemyDirection[] = [];
+      if (isForwardOpen) availableDirs.push(forward);
+      for (const p of openPerps) availableDirs.push(p);
+      if (!isForwardOpen && isReverseOpen) availableDirs.push(reverse);
+
+      if (availableDirs.length > 0) {
+        if (rng() < 0.9 || !isForwardOpen) {
+          const chosen = this.getDirectionMinimizingDistance(tx, ty, availableDirs, playerTile, rng);
+          this.setEnemyDirection(enemy, chosen, rng);
+          return;
+        }
+      }
+
+      if (isForwardOpen) {
+        return;
+      }
+      return;
+    }
+  }
+
   private evaluateTurnAtIntersection(
     enemy: EnemyEntity,
     playerTile: { x: number; y: number },
     grid: IStageGridEngine,
     ordinance: IOrdinanceEngine
   ): void {
-    const tx = Math.round(enemy.x / 16);
-    const ty = Math.round(enemy.y / 16);
-
-    const canPass = (targetTx: number, targetTy: number) =>
-      this.canEnemyPassTile(targetTx, targetTy, enemy, grid, ordinance);
-
-    const forward = enemy.direction;
-    const reverse = this.getOppositeDirection(forward);
-    const [perp1, perp2] = this.getPerpendicularDirections(forward);
-
-    const isForwardOpen = canPass(tx + this.dirX(forward), ty + this.dirY(forward));
-    const isPerp1Open = canPass(tx + this.dirX(perp1), ty + this.dirY(perp1));
-    const isPerp2Open = canPass(tx + this.dirX(perp2), ty + this.dirY(perp2));
-    const isReverseOpen = canPass(tx + this.dirX(reverse), ty + this.dirY(reverse));
-
-    // ONEAL burst check (persigue si está a <= 4 tiles)
-    if (enemy.type === 'ONEAL') {
-      const distToPlayer = Math.abs(tx - playerTile.x) + Math.abs(ty - playerTile.y);
-      if (distToPlayer <= 4) {
-        enemy.speed = ONEAL_BURST_SPEED; // 0.75 px/tick
-      } else {
-        enemy.speed = ENEMY_BASE_SPEEDS.ONEAL; // 0.5 px/tick
-      }
-    }
-
-    // AI Direction Selection
-    const openDirections: EnemyDirection[] = [];
-    if (isForwardOpen) openDirections.push(forward);
-    if (isPerp1Open) openDirections.push(perp1);
-    if (isPerp2Open) openDirections.push(perp2);
-
-    // Chasing Archetypes: MINVO, PASS, KONDORIA, PONTAN, or ONEAL in burst
-    const isChaser =
-      enemy.type === 'MINVO' ||
-      enemy.type === 'PASS' ||
-      enemy.type === 'KONDORIA' ||
-      enemy.type === 'PONTAN' ||
-      (enemy.type === 'ONEAL' && enemy.speed === ONEAL_BURST_SPEED);
-
-    if (isChaser && (openDirections.length > 0 || isReverseOpen)) {
-      const candidates = openDirections.length > 0 ? openDirections : [reverse];
-      // Pick direction that minimizes Manhattan distance to player
-      let bestDir = candidates[0];
-      let bestDist = Infinity;
-
-      for (const d of candidates) {
-        const nextX = tx + this.dirX(d);
-        const nextY = ty + this.dirY(d);
-        const dScore = Math.abs(nextX - playerTile.x) + Math.abs(nextY - playerTile.y);
-        if (dScore < bestDist) {
-          bestDist = dScore;
-          bestDir = d;
-        }
-      }
-
-      enemy.direction = bestDir;
-      return;
-    }
-
-    // Wandering Archetypes: BALLOM, DAHL, OVAPE
-    if (openDirections.length > 0) {
-      if (enemy.type === 'DAHL') {
-        // DAHL prefers perpendicular turns
-        const openPerps: EnemyDirection[] = [];
-        if (isPerp1Open) openPerps.push(perp1);
-        if (isPerp2Open) openPerps.push(perp2);
-
-        if (openPerps.length > 0) {
-          enemy.direction = openPerps[Math.floor(Math.random() * openPerps.length)];
-          return;
-        }
-      }
-
-      // Ballom / Ovape: 75% continue forward if open, otherwise turn
-      if (isForwardOpen && Math.random() < 0.75) {
-        enemy.direction = forward;
-      } else {
-        enemy.direction = openDirections[Math.floor(Math.random() * openDirections.length)];
-      }
-    } else if (isReverseOpen) {
-      // Dead end: turnaround 180 degrees
-      enemy.direction = reverse;
-    }
+    this.evaluateDecisionAtTile(enemy, playerTile, grid, ordinance, this.defaultRng);
   }
 
   public checkFlameCollisions(
@@ -809,6 +1187,6 @@ export class EnemiesEngine implements IEnemiesEngine {
   }
 }
 
-export function createEnemiesEngine(): IEnemiesEngine {
-  return new EnemiesEngine();
+export function createEnemiesEngine(rng?: () => number): IEnemiesEngine {
+  return new EnemiesEngine(rng);
 }

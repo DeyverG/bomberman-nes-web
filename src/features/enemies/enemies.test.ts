@@ -866,4 +866,308 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(enemy.x).toBe(48.0);
     });
   });
+
+  describe('Corridor Sweeping AI (Inercia de Carril) & Canonical NES Behaviors', () => {
+    it('initializes spawn direction with balanced 50/50 horizontal vs vertical axis choice', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Clear a 3x3 cross at (6, 5) so UP, DOWN, LEFT, RIGHT are all open
+      grid.setTile(6, 5, TileType.EMPTY);
+      grid.setTile(5, 5, TileType.EMPTY);
+      grid.setTile(7, 5, TileType.EMPTY);
+      grid.setTile(6, 4, TileType.EMPTY);
+      grid.setTile(6, 6, TileType.EMPTY);
+
+      // RNG < 0.5 -> Horizontal axis (LEFT or RIGHT)
+      const hDir = engine.chooseInitialDirection(6, 5, false, grid, () => 0.2);
+      expect(['LEFT', 'RIGHT']).toContain(hDir);
+
+      // RNG >= 0.5 -> Vertical axis (UP or DOWN)
+      const vDir = engine.chooseInitialDirection(6, 5, false, grid, () => 0.8);
+      expect(['UP', 'DOWN']).toContain(vDir);
+    });
+
+    it('Invariant 1: BALLOM in long open corridor NEVER reverses mid-corridor while tilesWalkedInCurrentDir < 3', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 240.0;
+      player.y = 240.0;
+
+      // Create an open corridor from tx=5 to tx=12 along ty=1 (outside safe zone Manhattan >= 5)
+      for (let x = 5; x <= 12; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        grid.setTile(x, 0, TileType.HARD_WALL);
+        grid.setTile(x, 2, TileType.HARD_WALL);
+      }
+
+      const ballom = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(ballom).not.toBeNull();
+      if (!ballom) return;
+
+      ballom.direction = 'RIGHT';
+      ballom.x = 96.0; // tile (6, 1)
+      ballom.y = 16.0;
+      ballom.tilesWalkedInCurrentDir = 0;
+
+      // Mock RNG that would try to reverse if allowed (returns 0.0)
+      const mockRng = () => 0.0;
+
+      // Step 1: At tile 6, forward is open, tilesWalked is 0 (< 3)
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Step 2: At tile 7, tilesWalked is 1 (< 3)
+      ballom.x = 112.0;
+      ballom.tilesWalkedInCurrentDir = 1;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Step 3: At tile 8, tilesWalked is 2 (< 3)
+      ballom.x = 128.0;
+      ballom.tilesWalkedInCurrentDir = 2;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Even at a 4-way cross when tilesWalked < 3, BALLOM does NOT turn (100% straight)
+      grid.setTile(8, 0, TileType.EMPTY);
+      grid.setTile(8, 2, TileType.EMPTY);
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Only when tilesWalked >= 3 at a cross with open perpendiculars:
+      // With rng < 0.20, it turns perpendicular
+      ballom.tilesWalkedInCurrentDir = 3;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.1);
+      expect(['UP', 'DOWN']).toContain(ballom.direction);
+    });
+
+    it('BALLOM at obstacle fin-de-pasillo splits 50% perpendicular and 50% reverse', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Tile (6, 1): facing RIGHT towards HARD_WALL at (7, 1)
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.HARD_WALL); // Forward blocked
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.EMPTY); // DOWN is open
+      grid.setTile(5, 1, TileType.EMPTY); // Reverse (LEFT) is open
+
+      const ballom = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(ballom).not.toBeNull();
+      if (!ballom) return;
+
+      ballom.direction = 'RIGHT';
+      ballom.x = 96.0;
+      ballom.y = 16.0;
+
+      // RNG < 0.5 -> chooses perpendicular (DOWN)
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.25);
+      expect(ballom.direction).toBe('DOWN');
+
+      // Reset to RIGHT: RNG >= 0.5 -> chooses reverse (LEFT)
+      ballom.direction = 'RIGHT';
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.75);
+      expect(ballom.direction).toBe('LEFT');
+    });
+
+    it('Invariant 2: ONEAL can reverse 180 degrees mid-corridor when tilesWalkedInCurrentDir >= reversalQuota without touching wall', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 240.0;
+      player.y = 240.0; // Far away (distance > 7)
+
+      // Straight corridor from tx=5 to tx=12
+      for (let x = 5; x <= 12; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        grid.setTile(x, 0, TileType.HARD_WALL);
+        grid.setTile(x, 2, TileType.HARD_WALL);
+      }
+
+      const oneal = engine.spawnEnemy('ONEAL', 6, 1, grid);
+      expect(oneal).not.toBeNull();
+      if (!oneal) return;
+
+      oneal.direction = 'RIGHT';
+      oneal.x = 96.0;
+      oneal.y = 16.0;
+      oneal.reversalQuota = 2;
+      oneal.tilesWalkedInCurrentDir = 1; // < reversalQuota
+
+      // RNG < 0.45, but quota not met -> keeps forward
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined, () => 0.1);
+      expect(oneal.direction).toBe('RIGHT');
+
+      // Advance to 2nd tile: quota met (tilesWalkedInCurrentDir = 2 >= 2)
+      oneal.tilesWalkedInCurrentDir = 2;
+      oneal.x = 112.0;
+
+      // RNG < 0.45 -> triggers 180° mid-corridor reversal to LEFT!
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined, () => 0.1);
+      expect(oneal.direction).toBe('LEFT');
+      expect(oneal.tilesWalkedInCurrentDir).toBe(0);
+    });
+
+    it('ONEAL detects unblocked Line of Sight within 8 tiles, accelerates to burst speed 0.65, and faces player', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Clear row 1 from col 2 to 8
+      for (let x = 2; x <= 8; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      player.x = 128.0; // tile (8, 1)
+      player.y = 16.0;
+
+      const oneal = engine.spawnEnemy('ONEAL', 2, 1, grid);
+      if (!oneal) return;
+
+      oneal.direction = 'UP'; // Facing away
+      oneal.x = 32.0;
+      oneal.y = 16.0;
+
+      // Check LOS
+      const los = engine.hasLineOfSight(2, 1, 8, 1, oneal, grid);
+      expect(los).toBe(true);
+
+      // Evaluate at intersection
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined);
+      expect(oneal.speed).toBe(0.65);
+      expect(oneal.direction).toBe('RIGHT'); // Turns towards player
+
+      // Obstructing tile with SOFT_BLOCK breaks line of sight for ONEAL
+      grid.setTile(5, 1, TileType.SOFT_BLOCK);
+      const losBlocked = engine.hasLineOfSight(2, 1, 8, 1, oneal, grid);
+      expect(losBlocked).toBe(false);
+    });
+
+    it('Invariant 3: Wallpass capability strictly differentiates ghost enemies (KONDORIA, OVAPE, PONTAN) from solid enemies', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      grid.setTile(5, 5, TileType.SOFT_BLOCK);
+
+      // Solid enemies cannot pass soft blocks
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: false }, grid)).toBe(false);
+
+      // Ghost enemies can pass soft blocks
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: true }, grid)).toBe(true);
+
+      // HARD_WALL is blocked for ALL enemies
+      grid.setTile(5, 5, TileType.HARD_WALL);
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: false }, grid)).toBe(false);
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: true }, grid)).toBe(false);
+    });
+
+    it('DAHL prefers perpendicular turns (70% probability) when reaching quota or obstacle', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY); // forward open
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.EMPTY); // DOWN perpendicular open
+      grid.setTile(5, 1, TileType.EMPTY); // reverse open
+
+      const dahl = engine.spawnEnemy('DAHL', 6, 1, grid);
+      if (!dahl) return;
+
+      dahl.direction = 'RIGHT';
+      dahl.x = 96.0;
+      dahl.y = 16.0;
+      dahl.reversalQuota = 2;
+      dahl.tilesWalkedInCurrentDir = 2;
+
+      // Roll < 0.70 -> turns to perpendicular (DOWN)
+      engine.evaluateDecisionAtTile(dahl, player.centerTile, grid, undefined, () => 0.5);
+      expect(dahl.direction).toBe('DOWN');
+    });
+
+    it('MINVO reverses when walking away from player for >= 2 tiles (75% probability)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player is at (2, 1) -> left of Minvo
+      player.x = 32.0;
+      player.y = 16.0;
+
+      // Corridor from 2 to 7
+      for (let x = 2; x <= 7; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      const minvo = engine.spawnEnemy('MINVO', 5, 1, grid);
+      if (!minvo) return;
+
+      // Minvo is moving RIGHT (away from player who is at tile 2)
+      minvo.direction = 'RIGHT';
+      minvo.x = 80.0;
+      minvo.y = 16.0;
+      minvo.tilesWalkedInCurrentDir = 2;
+
+      // Roll < 0.75 -> reverses towards player (LEFT)
+      engine.evaluateDecisionAtTile(minvo, player.centerTile, grid, undefined, () => 0.5);
+      expect(minvo.direction).toBe('LEFT');
+    });
+
+    it('KONDORIA relentlessly pathfinds minimizing Manhattan distance through soft blocks (85% probability)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player at (5, 5). Kondoria at (3, 3) (odd intersection)
+      player.x = 80.0;
+      player.y = 80.0;
+
+      // Fill tile (4, 3) with SOFT_BLOCK
+      grid.setTile(4, 3, TileType.SOFT_BLOCK);
+      grid.setTile(3, 4, TileType.EMPTY);
+
+      const kondoria = engine.spawnEnemy('KONDORIA', 3, 3, grid);
+      if (!kondoria) return;
+
+      kondoria.direction = 'UP'; // was moving UP (away)
+      kondoria.x = 48.0;
+      kondoria.y = 48.0;
+
+      // Kondoria has wallpass, can pass through SOFT_BLOCK at (4, 3) (RIGHT) or (3, 4) (DOWN)
+      // Both reduce Manhattan distance from 4 to 3.
+      // With rng < 0.85, Kondoria picks a direction minimizing distance to player
+      engine.evaluateDecisionAtTile(kondoria, player.centerTile, grid, undefined, () => 0.1);
+      expect(['RIGHT', 'DOWN']).toContain(kondoria.direction);
+    });
+
+    it('PASS & PONTAN immediately reverse 180 degrees (90% probability) when player is detected behind them', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player is at tile (2, 1)
+      player.x = 32.0;
+      player.y = 16.0;
+
+      for (let x = 1; x <= 7; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      const pass = engine.spawnEnemy('PASS', 5, 1, grid);
+      if (!pass) return;
+
+      // PASS moving RIGHT with player at tile 2 behind it
+      pass.direction = 'RIGHT';
+      pass.x = 80.0;
+      pass.y = 16.0;
+
+      // Roll < 0.90 -> immediate 180° turnaround to LEFT
+      engine.evaluateDecisionAtTile(pass, player.centerTile, grid, undefined, () => 0.1);
+      expect(pass.direction).toBe('LEFT');
+    });
+  });
 });

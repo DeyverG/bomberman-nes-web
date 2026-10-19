@@ -131,6 +131,71 @@ When a bomb is newly placed in front of an enemy moving towards tile $(targetTx,
 - It immediately snaps to the border of its current tile and reverses direction $180^\circ$ on that exact tick.
 - This allows the player to trap enemies between two bombs or between a bomb and a wall.
 
+### 4.5 AI State Tracking Counters (`EnemyEntity` & `EnemySnapshot`)
+To reproduce authentic NES corridor sweeping without chaotic erratic turning:
+1. `tilesWalkedInCurrentDir: number`:
+   - Increments by $+1$ each time the enemy snaps to a new tile intersection along its current direction vector.
+   - Resets strictly to $0$ whenever the enemy changes direction (including $180^\circ$ turnaround or perpendicular turns).
+2. `reversalQuota: number`:
+   - An integer quota assigned upon spawning and refreshed whenever direction changes.
+   - For `DAHL`: randomly drawn in $[2, 4]$.
+   - For `OVAPE`: randomly drawn in $[3, 6]$.
+   - For all other archetypes: randomly drawn in $[2, 6]$.
+
+### 4.6 Initial Spawn Axis Selection (`chooseInitialDirection`)
+Upon spawning at $(tx, ty)$:
+- Inspects which cardinal directions are passable (`UP`, `DOWN`, `LEFT`, `RIGHT`).
+- When both horizontal (`LEFT`/`RIGHT`) and vertical (`UP`/`DOWN`) directions are available, chooses between the horizontal and vertical axis with equal 50/50 probability (`rng < 0.5`).
+- Guarantees natural dispersion across horizontal and vertical corridors from the start of the level.
+
+### 4.7 Canonical 8-Enemy Corridor Sweeping Decision Rules (NES 1985)
+
+#### 1. `BALLOM` (Orange Balloon — $0.375\text{ px/tick}$, `wallpass: false`)
+- **Corridor Inertia:** `BALLOM` **NEVER reverses ($180^\circ$) mid-corridor** while the tile ahead is open.
+- **Crossing Check:** If the forward tile is open, it continues straight. Only when `tilesWalkedInCurrentDir >= 3` and passing through an intersection with open perpendiculars does it evaluate a modest **20% probability** of turning perpendicular (80% maintains forward momentum).
+- **Obstacle Collision (End of Corridor):** If forward is blocked, splits **50% perpendicular** and **50% reverse ($180^\circ$)** when perpendiculars are available. In a dead-end, reverses 100%.
+
+#### 2. `ONEAL` (Blue Onion — $0.5\text{ px/tick}$ base / $0.65\text{ px/tick}$ alert, `wallpass: false`)
+- **Line-of-Sight Chasing (LOS):** If Bomberman is in the same row or column within $\le 8$ tiles without intervening obstacles or bombs, `ONEAL` accelerates to `ONEAL_BURST_SPEED = 0.65 px/tick` and steers directly toward the player.
+- **Corridor Sweeping & Mid-Corridor Reversals:** In an open corridor, once `tilesWalkedInCurrentDir >= reversalQuota`:
+  - With **45% probability**, reverses $180^\circ$ mid-corridor (or takes a perpendicular branch if closer to Bomberman).
+  - With 55% probability, continues straight until hitting an obstacle.
+- **Proximity Steering:** When within $\le 7$ tiles Manhattan distance of Bomberman, has a **65% probability** of picking an open axis that minimizes distance to the player.
+
+#### 3. `DAHL` (Red Barrel — $0.625\text{ px/tick}$, `wallpass: false`)
+- **Hyperkinetic Axis Alternation:** Rapidly sweeps corridors, constantly bouncing off walls.
+- Upon colliding with an obstacle or reaching its quota of $2$ to $4$ tiles:
+  - **70% probability** of turning into an open perpendicular corridor (alternating horizontal/vertical).
+  - **25% probability** of reversing $180^\circ$.
+  - **5% probability** of continuing straight if open.
+
+#### 4. `MINVO` (Agile Green Face — $0.75\text{ px/tick}$, `wallpass: false`)
+- **Relentless Corridor Chase:**
+  - If moving away from Bomberman along the current axis and `tilesWalkedInCurrentDir >= 2`, evaluates a **75% probability of immediately reversing ($180^\circ$)** to reorient toward the player.
+  - At any fork or intersection with an open branch approaching Bomberman, turns toward the player **80% of the time** (20% forward inertia).
+
+#### 5. `KONDORIA` (Slow Ghost Amoeba — $0.25\text{ px/tick}$, `wallpass: true`)
+- **Phasing Pathfinding:** Traverses `SOFT_BLOCK` freely, blocked strictly by `HARD_WALL` and active bombs.
+- At odd grid intersections $(tx \pmod 2 \neq 0 \land ty \pmod 2 \neq 0)$ or every $2$ to $4$ tiles:
+  - Evaluates Manhattan distance to Bomberman across all 4 cardinal directions.
+  - With **85% probability**, steers along the vector that minimizes Manhattan distance to the player.
+
+#### 6. `OVAPE` (Wandering Ghost — $0.375\text{ px/tick}$, `wallpass: true`)
+- **Soft Block Patrolling:** Moves straight through `SOFT_BLOCK` tiles.
+- Upon completing its quota of $3$ to $6$ tiles:
+  - **30% probability** of reversing $180^\circ$.
+  - **35% probability** of turning perpendicular (through blocks or open ground).
+  - **35% probability** of continuing straight.
+- At map perimeter or `HARD_WALL`: 50% turns perpendicular, 50% reverses.
+
+#### 7 & 8. `PASS` ($1.0\text{ px/tick}$, `wallpass: false`) & `PONTAN` ($1.125\text{ px/tick}$, `wallpass: true`)
+- **Elite Hunters with Instant Rear Detection:**
+  - If Bomberman is behind the entity (reverse direction decreases Manhattan distance) and reverse is open:
+    - Evaluates an immediate **90% probability of reversing ($180^\circ$) on the very next tile**.
+  - At every fork or intersection:
+    - Chooses the direction minimizing Manhattan distance to Bomberman with **90% accuracy** (10% momentum).
+- `PASS` is bounded by `SOFT_BLOCK`, while `PONTAN` phases through `SOFT_BLOCK` along the direct line of sight.
+
 ---
 
 ## 5. Simultaneous Bomb Combo Kill Multipliers
