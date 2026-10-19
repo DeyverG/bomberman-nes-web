@@ -1,0 +1,31 @@
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-nes: 'Press Start 2P', monospace;
+  --color-nes-gray: #bcbcbc;
+  --color-nes-green: #00a800;
+  --color-nes-black: #000000;
+  --color-nes-white: #ffffff;
+  --color-nes-red: #f83800;
+  --color-nes-brick: #e45c10;
+  --color-nes-stage-bg: #00a800;
+}
+
+/* Hard pixel rendering contract for NES Canvas */
+canvas {
+  image-rendering: -moz-crisp-edges;
+  image-rendering: -webkit-crisp-edges;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #000000;
+  color: #ffffff;
+  font-family: var(--font-nes);
+  user-select: none;
+  -webkit-font-smoothing: none;
+}
