@@ -55,6 +55,9 @@ export class BombermanEntity implements IBombermanEntity {
   private _state: PlayerState = 'SPAWNING';
   private _facing: FacingDirection = 'DOWN';
   private _stateTimerMs = 0;
+  public isMoving = false;
+  public walkFrame = 0;
+  public walkAnimTimerMs = 0;
 
   public readonly stats: PlayerStats = {
     lives: DEFAULT_INITIAL_LIVES,
@@ -118,6 +121,9 @@ export class BombermanEntity implements IBombermanEntity {
     this._state = 'SPAWNING';
     this._facing = 'DOWN';
     this._stateTimerMs = 0;
+    this.isMoving = false;
+    this.walkFrame = 0;
+    this.walkAnimTimerMs = 0;
   }
 
   public getSnapshot(): PlayerSnapshot {
@@ -131,6 +137,8 @@ export class BombermanEntity implements IBombermanEntity {
       stats: { ...this.stats },
       isInvulnerable: this.isInvulnerable,
       deathTimerMs: this._stateTimerMs,
+      isMoving: this.isMoving,
+      walkFrame: this.walkFrame,
     };
   }
 
@@ -154,16 +162,30 @@ export class BombermanEntity implements IBombermanEntity {
         this._stateTimerMs = 0;
       }
     } else if (this._state === 'DYING') {
+      this.isMoving = false;
+      this.walkFrame = 0;
+      this.walkAnimTimerMs = 0;
       if (this._stateTimerMs >= DEATH_DURATION_MS) {
         this._state = 'DEAD';
         this.stats.lives = Math.max(0, this.stats.lives - 1);
       }
       return; // Freeze movement while dying
     } else if (this._state === 'DEAD') {
+      this.isMoving = false;
+      this.walkFrame = 0;
+      this.walkAnimTimerMs = 0;
       return;
     }
 
-    if (this._state !== 'ALIVE') return;
+    if (this._state !== 'ALIVE') {
+      this.isMoving = false;
+      this.walkFrame = 0;
+      this.walkAnimTimerMs = 0;
+      return;
+    }
+
+    const prevX = this.x;
+    const prevY = this.y;
 
     // Resolve primary and secondary direction
     let primaryDir: CardinalDirection | null = null;
@@ -185,6 +207,19 @@ export class BombermanEntity implements IBombermanEntity {
       if (!moved && secondaryDir) {
         this.attemptMove(secondaryDir, currentSpeed, grid, obstacleQuery);
       }
+    }
+
+    // Exact movement calculation and idle leg freeze
+    const deltaMoved = Math.abs(this.x - prevX) + Math.abs(this.y - prevY);
+    this.isMoving = deltaMoved > 0.001 && this._state === 'ALIVE';
+    if (this.isMoving) {
+      this.walkAnimTimerMs += deltaMs;
+      const seq = [0, 1, 0, 2];
+      const step = Math.floor(this.walkAnimTimerMs / 90) % seq.length;
+      this.walkFrame = seq[step];
+    } else {
+      this.walkFrame = 0;
+      this.walkAnimTimerMs = 0;
     }
   }
 

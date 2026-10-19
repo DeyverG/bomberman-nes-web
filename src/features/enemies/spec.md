@@ -84,6 +84,12 @@ To reproduce the authentic safe opening feeling of NES Bomberman:
   - El ítem se calcina y desaparece, transformando la casilla en `TileType.EMPTY`.
   - También invoca `enemies.spawnTrapWave(stage, tx, ty)`, naciendo 8 enemigos escalados desde dicha coordenada $(tx, ty)$.
 
+#### 3.3.3 Inmunidad de Nacimiento en Trampas (`spawnImmunityMs = 520`)
+- Para evitar el exploit de que la misma explosión de $480\text{ ms}$ que detonó la trampa de la puerta o del power-up destruya instantáneamente a los 8 enemigos recién invocados en el mismo fotograma:
+  - Todo enemigo instanciado vía `spawnFromTile` nace con `spawnImmunityMs = 520`.
+  - Mientras `spawnImmunityMs > 0`, el enemigo no puede ser dañado ni destruido por ninguna flama (`checkFlameCollisions` lo ignora).
+  - El contador se reduce con cada tick (`deltaMs`) hasta llegar a 0, garantizando que sobrevivan a la flama originaria y requieran combate activo.
+
 ### 3.4 Tile Qualification
 - **Standard Enemies (`BALLOM`, `ONEAL`, `DAHL`, `MINVO`, `PASS`):**
   Must spawn on tiles that are `TileType.EMPTY` (walkable ground, no hard walls, no soft blocks).

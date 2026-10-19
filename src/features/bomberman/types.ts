@@ -62,6 +62,8 @@ export interface PlayerSnapshot {
   readonly stats: Readonly<PlayerStats>;
   readonly isInvulnerable: boolean;
   readonly deathTimerMs: number;
+  readonly isMoving: boolean;
+  readonly walkFrame: number;
 }
 
 /**
@@ -90,6 +92,9 @@ export interface IBombermanEntity {
   readonly stats: PlayerStats;
   readonly centerTile: TileCoord;
   readonly isInvulnerable: boolean;
+  readonly isMoving: boolean;
+  readonly walkFrame: number;
+  walkAnimTimerMs: number;
 
   /**
    * Updates player movement, applies corner-sliding against the stage grid and solid bombs, and ticks timers.

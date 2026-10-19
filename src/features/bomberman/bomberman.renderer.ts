@@ -44,7 +44,7 @@ export class BombermanRenderer {
     if (player.state === 'DYING') {
       this.drawDying(screenX, screenY, player.getSnapshot().deathTimerMs);
     } else {
-      this.drawAlive(screenX, screenY, player.facing);
+      this.drawAlive(screenX, screenY, player.facing, player.walkFrame);
     }
 
     // Hitbox outline strictly for debugging (activated via F2)
@@ -63,10 +63,8 @@ export class BombermanRenderer {
   /**
    * Draws authentic NES Bomberman 16x16 pixel-art sprite with walking animation.
    */
-  private drawAlive(x: number, y: number, facing: string): void {
-    // 3-frame walk cycle: WALK1 -> IDLE -> WALK2
-    const cycle = Math.floor(performance.now() / 120) % 3;
-    const frame = cycle === 0 ? 'IDLE' : cycle === 1 ? 'WALK1' : 'WALK2';
+  private drawAlive(x: number, y: number, facing: string, walkFrame: number): void {
+    const frame = walkFrame === 1 ? 'WALK1' : walkFrame === 2 ? 'WALK2' : 'IDLE';
     const spriteName = `BOMBERMAN_${facing}_${frame}`;
 
     drawNesSprite(this.ctx, spriteName, x, y);

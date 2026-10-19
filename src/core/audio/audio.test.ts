@@ -161,13 +161,24 @@ describe('8-Bit Synthesized Audio Subsystem (Unit Test Verification)', () => {
       expect(audio.isUnlocked).toBe(true);
     });
 
-    it('playStep() enforces 140ms throttling cooldown between consecutive footsteps', () => {
-      const { mockCtx } = createMockAudioContext();
+    it('playStep() enforces 140ms throttling cooldown and synthesizes authentic square wave micro-pulses', () => {
+      const { mockCtx, mockOscillatorNode, mockGainNode } = createMockAudioContext();
       const audio = new AudioEngine({ contextFactory: () => mockCtx });
 
-      // First step triggers oscillator
+      // First step triggers oscillator with step A (980Hz -> 620Hz in 28ms)
       audio.playStep();
       expect(mockCtx.createOscillator).toHaveBeenCalledTimes(1);
+      expect(mockOscillatorNode.type).toBe('square');
+      expect(mockOscillatorNode.frequency.setValueAtTime).toHaveBeenCalledWith(980, mockCtx.currentTime);
+      expect(mockOscillatorNode.frequency.exponentialRampToValueAtTime).toHaveBeenCalledWith(
+        620,
+        mockCtx.currentTime + 0.028
+      );
+      expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(0.18, mockCtx.currentTime);
+      expect(mockGainNode.gain.exponentialRampToValueAtTime).toHaveBeenCalledWith(
+        0.001,
+        mockCtx.currentTime + 0.028
+      );
 
       // Immediate second step within 140ms cooldown is throttled
       audio.playStep();
@@ -261,6 +272,91 @@ describe('8-Bit Synthesized Audio Subsystem (Unit Test Verification)', () => {
         110,
         mockCtx.currentTime + 0.75
       );
+    });
+  });
+
+  describe('Chiptune BGM Sequencer (3-Channel Polyphony & State Machine)', () => {
+    it('initializes with currentBgm = null and isBgmPlaying = false', () => {
+      const audio = createAudioEngine();
+      expect(audio.currentBgm).toBeNull();
+      expect(audio.isBgmPlaying).toBe(false);
+    });
+
+    it('playTitleBgm() activates TITLE track and schedules polyphonic channels', () => {
+      const { mockCtx } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playTitleBgm();
+      expect(audio.currentBgm).toBe('TITLE');
+      expect(audio.isBgmPlaying).toBe(true);
+      expect(mockCtx.createOscillator).toHaveBeenCalled();
+    });
+
+    it('playStageIntro() activates STAGE_INTRO fanfare', () => {
+      const { mockCtx } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playStageIntro();
+      expect(audio.currentBgm).toBe('STAGE_INTRO');
+      expect(audio.isBgmPlaying).toBe(true);
+    });
+
+    it('playStageTheme() activates STAGE_THEME iconic Jun Chikuma 148 BPM theme', () => {
+      const { mockCtx } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playStageTheme();
+      expect(audio.currentBgm).toBe('STAGE_THEME');
+      expect(audio.isBgmPlaying).toBe(true);
+      expect(mockCtx.createOscillator).toHaveBeenCalled();
+    });
+
+    it('playGameOver() activates GAME_OVER track', () => {
+      const { mockCtx } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playGameOver();
+      expect(audio.currentBgm).toBe('GAME_OVER');
+      expect(audio.isBgmPlaying).toBe(true);
+    });
+
+    it('pauseBgm() and resumeBgm() properly toggle playback state and gain without stopping track', () => {
+      const { mockCtx, mockGainNode } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playStageTheme();
+      expect(audio.isBgmPlaying).toBe(true);
+      expect(audio.currentBgm).toBe('STAGE_THEME');
+
+      // Pause BGM: sets isBgmPlaying = false while keeping currentBgm intact
+      audio.pauseBgm();
+      expect(audio.isBgmPlaying).toBe(false);
+      expect(audio.currentBgm).toBe('STAGE_THEME');
+      expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(0, mockCtx.currentTime);
+
+      // Resume BGM: brings volume back up and restores isBgmPlaying = true
+      audio.resumeBgm();
+      expect(audio.isBgmPlaying).toBe(true);
+      expect(audio.currentBgm).toBe('STAGE_THEME');
+    });
+
+    it('stopBgm() and stopAll() immediately cancel playback and reset currentBgm to null', () => {
+      const { mockCtx } = createMockAudioContext();
+      const audio = new AudioEngine({ contextFactory: () => mockCtx });
+
+      audio.playStageTheme();
+      expect(audio.currentBgm).toBe('STAGE_THEME');
+
+      audio.stopBgm();
+      expect(audio.currentBgm).toBeNull();
+      expect(audio.isBgmPlaying).toBe(false);
+
+      audio.playTitleBgm();
+      expect(audio.currentBgm).toBe('TITLE');
+
+      audio.stopAll();
+      expect(audio.currentBgm).toBeNull();
+      expect(audio.isBgmPlaying).toBe(false);
     });
   });
 });

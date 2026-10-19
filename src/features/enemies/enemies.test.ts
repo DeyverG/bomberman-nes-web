@@ -595,6 +595,58 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(wave10).toHaveLength(8);
       expect(wave10.every((e) => e.type === 'PONTAN')).toBe(true);
     });
+
+    it('grants 520ms spawn immunity so enemies spawned by bombing a door survive the triggering explosion', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const ordinance = createOrdinanceEngine();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+
+      // Place bomb directly on door and detonate
+      const bomb = ordinance.placeBomb(doorCoord.x, doorCoord.y, player, grid);
+      expect(bomb).not.toBeNull();
+      ordinance.detonateBomb(bomb!.id, grid, player);
+
+      // Bomb explosion is now active with flame covering the door tile
+      expect(ordinance.activeExplosions.length).toBe(1);
+
+      // Bombing the door triggers spawnFromTile (or spawnTrapWave)
+      const spawned = engine.spawnFromTile(doorCoord.x, doorCoord.y, 8, 'ONEAL');
+      expect(spawned).toHaveLength(8);
+      expect(spawned.every((e) => e.spawnImmunityMs === 520)).toBe(true);
+
+      // 1. During initial tick (frame 0), flame collisions MUST NOT kill the newly spawned enemies
+      const instantKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(instantKills).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 2. Advance 300ms (within 480ms explosion duration): enemies still immune (spawnImmunityMs = 220)
+      engine.update(300, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(220);
+      const midKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(midKills).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 3. Advance another 180ms (total 480ms): explosion naturally expires, immunity has 40ms left
+      ordinance.update(480, player, grid);
+      engine.update(180, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(40);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 4. Advance past 520ms: spawnImmunityMs drops to 0
+      engine.update(50, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(0);
+
+      // 5. Now a subsequent bomb explosion will kill the enemies
+      const bomb2 = ordinance.placeBomb(doorCoord.x, doorCoord.y, player, grid);
+      ordinance.detonateBomb(bomb2!.id, grid, player);
+      const lateKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(lateKills.length).toBeGreaterThan(0);
+    });
   });
 
   describe('Enemy Death Sequence (DYING State)', () => {

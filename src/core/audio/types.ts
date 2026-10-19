@@ -21,6 +21,11 @@ export type AudioEffectType =
   | 'PAUSE';
 
 /**
+ * Categorical BGM tracks synthesized by the chiptune engine
+ */
+export type BgmTrack = 'TITLE' | 'STAGE_THEME' | 'STAGE_INTRO' | 'STAGE_CLEAR' | 'GAME_OVER';
+
+/**
  * Configuration options for initializing the audio engine
  */
 export interface AudioEngineConfig {
@@ -42,6 +47,16 @@ export interface IAudioEngine {
    * True if AudioContext has been unlocked by user gesture and is in 'running' state.
    */
   readonly isUnlocked: boolean;
+
+  /**
+   * Current active BGM track or null if stopped.
+   */
+  readonly currentBgm: BgmTrack | null;
+
+  /**
+   * True if BGM is currently actively playing or looping.
+   */
+  readonly isBgmPlaying: boolean;
 
   /**
    * Resumes or creates the underlying AudioContext upon user gesture.
@@ -94,7 +109,7 @@ export interface IAudioEngine {
   playPlayerDeath(): void;
 
   /**
-   * 8-bit opening fanfare when STAGE X curtain is displayed.
+   * 8-bit opening fanfare when STAGE X curtain is displayed (2200ms duration).
    */
   playStageIntro(): void;
 
@@ -109,7 +124,37 @@ export interface IAudioEngine {
   playPause(): void;
 
   /**
-   * Stops any currently active recurring oscillators or fanfares.
+   * 3-channel chiptune title screen theme looping continuously.
+   */
+  playTitleBgm(): void;
+
+  /**
+   * Iconic Jun Chikuma 3-channel NES Bomberman stage theme loop at 148 BPM.
+   */
+  playStageTheme(): void;
+
+  /**
+   * Somber 8-bit game over melody upon depleting all lives.
+   */
+  playGameOver(): void;
+
+  /**
+   * Stops any currently playing BGM track and cancels pending loops.
+   */
+  stopBgm(): void;
+
+  /**
+   * Pauses the currently playing BGM track without losing loop timing.
+   */
+  pauseBgm(): void;
+
+  /**
+   * Resumes playback of a paused BGM track.
+   */
+  resumeBgm(): void;
+
+  /**
+   * Stops any currently active recurring oscillators, fanfares, and BGM.
    */
   stopAll(): void;
 

@@ -179,6 +179,7 @@ export class EnemiesEngine implements IEnemiesEngine {
       hasWallpass,
       baseScore: ENEMY_BASE_SCORES[type],
       deathTimerMs: 0,
+      spawnImmunityMs: 0,
     };
 
     this._enemies.push(enemy);
@@ -372,6 +373,7 @@ export class EnemiesEngine implements IEnemiesEngine {
         hasWallpass: true,
         baseScore: ENEMY_BASE_SCORES.PONTAN,
         deathTimerMs: 0,
+        spawnImmunityMs: 0,
       };
 
       this._enemies.push(pontan);
@@ -419,6 +421,7 @@ export class EnemiesEngine implements IEnemiesEngine {
         hasWallpass: ENEMY_WALLPASS_CAPABILITIES[enemyType],
         baseScore: ENEMY_BASE_SCORES[enemyType],
         deathTimerMs: 0,
+        spawnImmunityMs: 520,
       };
 
       this._enemies.push(enemy);
@@ -438,6 +441,10 @@ export class EnemiesEngine implements IEnemiesEngine {
 
     for (let i = this._enemies.length - 1; i >= 0; i--) {
       const enemy = this._enemies[i];
+
+      if (enemy.spawnImmunityMs > 0) {
+        enemy.spawnImmunityMs = Math.max(0, enemy.spawnImmunityMs - deltaMs);
+      }
 
       if (enemy.state === 'DEAD') {
         this._enemies.splice(i, 1);
@@ -703,6 +710,7 @@ export class EnemiesEngine implements IEnemiesEngine {
 
         for (const enemy of this._enemies) {
           if (enemy.state !== 'ALIVE') continue;
+          if (enemy.spawnImmunityMs > 0) continue;
 
           // AABB overlap between Enemy (16x16) and Flame Segment (16x16)
           if (

@@ -103,6 +103,7 @@ export interface EnemyEntity {
   readonly baseScore: number;
   deathTimerMs: number;
   scoreAwarded?: number;
+  spawnImmunityMs: number;
 }
 
 /**
@@ -121,6 +122,7 @@ export interface EnemySnapshot {
   readonly hasWallpass: boolean;
   readonly deathTimerMs: number;
   readonly scoreAwarded?: number;
+  readonly spawnImmunityMs: number;
 }
 
 /**

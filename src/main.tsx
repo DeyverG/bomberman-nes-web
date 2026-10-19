@@ -103,6 +103,7 @@ let timeOutTriggered = false;
 let doorRevealedSoundPlayed = false;
 let enemiesClearedSoundPlayed = false;
 let playerDeathSoundPlayed = false;
+let stepDistancePx = 0;
 
 // Listen for session commands dispatched by HudShell
 window.addEventListener('nes-bomberman:action', (e: Event) => {
@@ -122,7 +123,9 @@ window.addEventListener('nes-bomberman:action', (e: Event) => {
       isPaused = !isPaused;
       audioEngine.playPause();
       if (isPaused) {
-        audioEngine.stopAll();
+        audioEngine.pauseBgm();
+      } else {
+        audioEngine.resumeBgm();
       }
       emitSessionState({ state: 'PLAYING', isPaused });
     }
@@ -139,6 +142,7 @@ window.addEventListener('nes-bomberman:action', (e: Event) => {
     doorRevealedSoundPlayed = false;
     enemiesClearedSoundPlayed = false;
     playerDeathSoundPlayed = false;
+    stepDistancePx = 0;
 
     // Support CONTINUE: restore permanent upgrades (bombs, flame, speed, score) with 3 lives
     if (continueStats) {
@@ -173,10 +177,12 @@ window.addEventListener('nes-bomberman:action', (e: Event) => {
   } else if (action === 'STAGE_READY') {
     isGameActive = true;
     isPaused = false;
+    audioEngine.playStageTheme();
   } else if (action === 'RESTART_TO_TITLE') {
     isGameActive = false;
     isPaused = false;
     audioEngine.stopAll();
+    audioEngine.playTitleBgm();
   }
 });
 
@@ -245,7 +251,9 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
         isPaused = !isPaused;
         audioEngine.playPause();
         if (isPaused) {
-          audioEngine.stopAll();
+          audioEngine.pauseBgm();
+        } else {
+          audioEngine.resumeBgm();
         }
         emitSessionState({ state: 'PLAYING', isPaused });
         return;
@@ -296,10 +304,15 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       const prevPlayerX = player.x;
       const prevPlayerY = player.y;
       player.update(fixedDeltaMs, directions, stageGrid, null, ordinanceEngine);
-      const moved =
-        Math.abs(player.x - prevPlayerX) + Math.abs(player.y - prevPlayerY) > 0.0001;
-      if (moved && player.state === 'ALIVE') {
-        audioEngine.playStep();
+      const deltaMoved = Math.abs(player.x - prevPlayerX) + Math.abs(player.y - prevPlayerY);
+      if (player.isMoving && player.state === 'ALIVE') {
+        stepDistancePx += deltaMoved;
+        if (stepDistancePx >= 10) {
+          stepDistancePx -= 10;
+          audioEngine.playStep();
+        }
+      } else {
+        stepDistancePx = 0;
       }
 
       // Advance ordinance (walk-off grace, fuse timers, explosions, and flame lethality)
@@ -367,6 +380,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       // Check enemy lethality against Bomberman
       enemiesEngine.checkPlayerLethality(player);
       if (player.state === 'DYING' && !playerDeathSoundPlayed) {
+        audioEngine.stopBgm();
         audioEngine.playPlayerDeath();
         playerDeathSoundPlayed = true;
       }
@@ -457,6 +471,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
         } else {
           // No lives remaining: Game Over
           emitSessionState({ state: 'GAME_OVER', score: player.stats.score });
+          audioEngine.playGameOver();
         }
       }
     },

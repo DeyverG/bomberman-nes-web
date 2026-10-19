@@ -1,18 +1,50 @@
 import {
   AudioEngineConfig,
+  BgmTrack,
   DEFAULT_MASTER_VOLUME,
   IAudioEngine,
   STEP_COOLDOWN_MS,
 } from './types';
 
+/**
+ * Standard NES 2A03 Tuning Frequencies in Hz
+ */
+export const NOTE_FREQS: Readonly<Record<string, number>> = {
+  // Octave 2
+  C2: 65.41, D2: 73.42, E2: 82.41, F2: 87.31, Fs2: 92.5, G2: 98.0, A2: 110.0, B2: 123.47,
+  // Octave 3
+  C3: 130.81, Cs3: 138.59, D3: 146.83, Ds3: 155.56, E3: 164.81, F3: 174.61, Fs3: 185.0, G3: 196.0, Gs3: 207.65, A3: 220.0, As3: 233.08, B3: 246.94,
+  // Octave 4
+  C4: 261.63, Cs4: 277.18, D4: 293.66, Ds4: 311.13, E4: 329.63, F4: 349.23, Fs4: 369.99, G4: 392.0, Gs4: 415.3, A4: 440.0, As4: 466.16, B4: 493.88,
+  // Octave 5
+  C5: 523.25, Cs5: 554.37, D5: 587.33, Ds5: 622.25, E5: 659.25, F5: 698.46, Fs5: 739.99, G5: 783.99, Gs5: 830.61, A5: 880.0, As5: 932.33, B5: 987.77,
+  // Octave 6
+  C6: 1046.5, D6: 1174.66, E6: 1318.51,
+  REST: 0,
+};
+
+export interface ChiptuneNote {
+  readonly f: number; // Frequency in Hz (0 = REST)
+  readonly d: number; // Duration in seconds
+  readonly vol?: number;
+}
+
 export class AudioEngine implements IAudioEngine {
   private ctx: AudioContext | null = null;
   private masterGain: GainNode | null = null;
+  private bgmGain: GainNode | null = null;
   private _isMuted = false;
   private masterVolume = DEFAULT_MASTER_VOLUME;
+  private bgmVolume = 0.22;
   private lastStepTimeMs = 0;
   private stepToggle = false;
   private contextFactory?: () => AudioContext | null;
+
+  // BGM Sequencer state
+  private _currentBgm: BgmTrack | null = null;
+  private _isBgmPaused = false;
+  private bgmTimer: ReturnType<typeof setTimeout> | null = null;
+  private activeBgmOscillators: OscillatorNode[] = [];
 
   constructor(config?: AudioEngineConfig) {
     this._isMuted = config?.initialMuted ?? false;
@@ -34,6 +66,14 @@ export class AudioEngine implements IAudioEngine {
 
   public get isUnlocked(): boolean {
     return this.ctx !== null && this.ctx.state === 'running';
+  }
+
+  public get currentBgm(): BgmTrack | null {
+    return this._currentBgm;
+  }
+
+  public get isBgmPlaying(): boolean {
+    return this._currentBgm !== null && !this._isBgmPaused;
   }
 
   private getAudioContext(): AudioContext | null {
@@ -58,6 +98,10 @@ export class AudioEngine implements IAudioEngine {
           this.ctx.currentTime
         );
         this.masterGain.connect(this.ctx.destination);
+
+        this.bgmGain = this.ctx.createGain();
+        this.bgmGain.gain.setValueAtTime(this.bgmVolume, this.ctx.currentTime);
+        this.bgmGain.connect(this.masterGain);
       } catch {
         // Fallback for mocked/synthetic contexts in unit tests
       }
@@ -120,19 +164,20 @@ export class AudioEngine implements IAudioEngine {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
-      osc.type = 'triangle';
-      const freq = this.stepToggle ? 110 : 130;
+      osc.type = 'square';
       this.stepToggle = !this.stepToggle;
-      osc.frequency.setValueAtTime(freq, t);
+      const [startFreq, endFreq] = this.stepToggle ? [980, 620] : [780, 480];
+      osc.frequency.setValueAtTime(startFreq, t);
+      osc.frequency.exponentialRampToValueAtTime(endFreq, t + 0.028);
 
       gain.gain.setValueAtTime(0.18, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.028);
 
       osc.connect(gain);
       gain.connect(this.masterGain);
 
       osc.start(t);
-      osc.stop(t + 0.03);
+      osc.stop(t + 0.028);
     } catch {
       // Graceful headless fallback
     }
@@ -333,83 +378,454 @@ export class AudioEngine implements IAudioEngine {
     }
   }
 
-  public playStageIntro(): void {
+  private scheduleChannel(
+    notes: ChiptuneNote[],
+    type: OscillatorType,
+    startTime: number,
+    baseGain: number
+  ): number {
     const ctx = this.getAudioContext();
-    if (!ctx || !this.masterGain) return;
+    if (!ctx || !this.bgmGain) return 0;
+
+    let t = startTime;
+    for (const note of notes) {
+      if (note.f > 0) {
+        try {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+
+          osc.type = type;
+          osc.frequency.setValueAtTime(note.f, t);
+
+          const vol = (note.vol ?? 1.0) * baseGain;
+          const notePlayDuration = Math.max(0.01, note.d * 0.88);
+          gain.gain.setValueAtTime(vol, t);
+          gain.gain.setValueAtTime(vol, t + notePlayDuration * 0.75);
+          gain.gain.exponentialRampToValueAtTime(0.001, t + notePlayDuration);
+
+          osc.connect(gain);
+          gain.connect(this.bgmGain);
+
+          osc.start(t);
+          osc.stop(t + notePlayDuration);
+
+          this.activeBgmOscillators.push(osc);
+        } catch {
+          // Graceful fallback for mock contexts
+        }
+      }
+      t += note.d;
+    }
+    return t - startTime;
+  }
+
+  private playBgmTrack(
+    track: BgmTrack,
+    lead: ChiptuneNote[],
+    harm: ChiptuneNote[],
+    bass: ChiptuneNote[],
+    loop: boolean
+  ): void {
+    this.stopBgm();
+    this._currentBgm = track;
+    this._isBgmPaused = false;
+
+    const ctx = this.getAudioContext();
+    if (!ctx || !this.bgmGain) return;
 
     try {
-      // 8-bit opening motif
-      const melody = [
-        { f: 523.25, d: 0.12 }, // C5
-        { f: 659.25, d: 0.12 }, // E5
-        { f: 783.99, d: 0.12 }, // G5
-        { f: 1046.5, d: 0.24 }, // C6
-        { f: 783.99, d: 0.12 }, // G5
-        { f: 1046.5, d: 0.36 }, // C6
-      ];
+      this.bgmGain.gain.setValueAtTime(this.bgmVolume, ctx.currentTime);
+    } catch {}
 
-      let t = ctx.currentTime;
-      melody.forEach(({ f, d }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+    const schedule = () => {
+      if (this._currentBgm !== track) return;
 
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(f, t);
+      const t0 = ctx.currentTime;
+      const dLead = this.scheduleChannel(lead, 'square', t0, 0.2);
+      const dHarm = this.scheduleChannel(harm, 'square', t0, 0.15);
+      const dBass = this.scheduleChannel(bass, 'triangle', t0, 0.32);
 
-        gain.gain.setValueAtTime(0.2, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + d);
+      const totalDuration = Math.max(dLead, dHarm, dBass, 0.1);
 
-        osc.connect(gain);
-        gain.connect(this.masterGain!);
+      if (loop && this._currentBgm === track) {
+        this.bgmTimer = setTimeout(() => {
+          if (this._currentBgm === track && !this._isBgmPaused) {
+            schedule();
+          }
+        }, Math.max(100, Math.floor((totalDuration - 0.05) * 1000)));
+      }
+    };
 
-        osc.start(t);
-        osc.stop(t + d);
+    schedule();
+  }
 
-        t += d;
-      });
-    } catch {
-      // Graceful fallback
-    }
+  public playStageIntro(): void {
+    const d = 0.14; // 8 ascending notes = 1.12s
+    const hold = 0.95; // Final hold = ~2.07s total (matches 2200ms intro screen)
+    const lead: ChiptuneNote[] = [
+      { f: NOTE_FREQS.E4, d },
+      { f: NOTE_FREQS.Fs4, d },
+      { f: NOTE_FREQS.Gs4, d },
+      { f: NOTE_FREQS.A4, d },
+      { f: NOTE_FREQS.B4, d },
+      { f: NOTE_FREQS.Cs5, d },
+      { f: NOTE_FREQS.D5, d },
+      { f: NOTE_FREQS.E5, d },
+      { f: NOTE_FREQS.E5, d: hold, vol: 1.2 },
+    ];
+    const harm: ChiptuneNote[] = [
+      { f: 0, d: d * 8 },
+      { f: NOTE_FREQS.Gs4, d: hold, vol: 0.9 },
+    ];
+    const bass: ChiptuneNote[] = [
+      { f: 0, d: d * 8 },
+      { f: NOTE_FREQS.E3, d: hold, vol: 1.1 },
+    ];
+
+    this.playBgmTrack('STAGE_INTRO', lead, harm, bass, false);
+  }
+
+  public playStageTheme(): void {
+    // 148 BPM Iconic Jun Chikuma Stage Theme
+    const beat = 60 / 148; // 0.4054s
+    const e = beat / 2;    // 0.2027s (8th note)
+    const s = beat / 4;    // 0.1014s (16th note)
+    const q = beat;        // 0.4054s (quarter note)
+    const h = beat * 2;    // 0.8108s (half note)
+    const dotE = e * 1.5;  // 0.3040s (dotted 8th)
+
+    const lead: ChiptuneNote[] = [
+      // Bar 1 (C)
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.B4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      // Bar 2 (G -> C)
+      { f: NOTE_FREQS.G4, d: dotE },
+      { f: NOTE_FREQS.A4, d: s },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: q },
+      { f: NOTE_FREQS.D4, d: q },
+      // Bar 3 (C)
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.B4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      // Bar 4 (G -> C)
+      { f: NOTE_FREQS.D5, d: dotE },
+      { f: NOTE_FREQS.E5, d: s },
+      { f: NOTE_FREQS.D5, d: q },
+      { f: NOTE_FREQS.C5, d: h },
+      // Bar 5 (Am)
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.E5, d: e },
+      { f: NOTE_FREQS.D5, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.B4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      // Bar 6 (F)
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.B4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      // Bar 7 (Dm -> G)
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      // Bar 8 (G -> C)
+      { f: NOTE_FREQS.G4, d: q },
+      { f: NOTE_FREQS.G3, d: q },
+      { f: NOTE_FREQS.C4, d: h },
+    ];
+
+    const harm: ChiptuneNote[] = [
+      // Bar 1
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      // Bar 2
+      { f: NOTE_FREQS.B3, d: dotE },
+      { f: NOTE_FREQS.C4, d: s },
+      { f: NOTE_FREQS.B3, d: e },
+      { f: NOTE_FREQS.A3, d: e },
+      { f: NOTE_FREQS.G3, d: q },
+      { f: NOTE_FREQS.F3, d: q },
+      // Bar 3
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      // Bar 4
+      { f: NOTE_FREQS.F4, d: dotE },
+      { f: NOTE_FREQS.G4, d: s },
+      { f: NOTE_FREQS.F4, d: q },
+      { f: NOTE_FREQS.E4, d: h },
+      // Bar 5
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.C5, d: e },
+      { f: NOTE_FREQS.B4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      // Bar 6
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.A4, d: e },
+      { f: NOTE_FREQS.G4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      // Bar 7
+      { f: NOTE_FREQS.B3, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.F4, d: e },
+      { f: NOTE_FREQS.E4, d: e },
+      { f: NOTE_FREQS.D4, d: e },
+      { f: NOTE_FREQS.C4, d: e },
+      { f: NOTE_FREQS.B3, d: e },
+      { f: NOTE_FREQS.A3, d: e },
+      // Bar 8
+      { f: NOTE_FREQS.E4, d: q },
+      { f: NOTE_FREQS.D4, d: q },
+      { f: NOTE_FREQS.C4, d: h },
+    ];
+
+    const bass: ChiptuneNote[] = [
+      // Bar 1 (C)
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      // Bar 2 (G -> C)
+      { f: NOTE_FREQS.B2, d: e }, { f: NOTE_FREQS.B2, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G2, d: e }, { f: NOTE_FREQS.G2, d: e },
+      // Bar 3 (C)
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      // Bar 4 (G -> C)
+      { f: NOTE_FREQS.G2, d: e }, { f: NOTE_FREQS.G2, d: e },
+      { f: NOTE_FREQS.G3, d: e }, { f: NOTE_FREQS.G3, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.C3, d: q },
+      // Bar 5 (Am)
+      { f: NOTE_FREQS.A2, d: e }, { f: NOTE_FREQS.A2, d: e },
+      { f: NOTE_FREQS.E3, d: e }, { f: NOTE_FREQS.E3, d: e },
+      { f: NOTE_FREQS.A2, d: e }, { f: NOTE_FREQS.A2, d: e },
+      { f: NOTE_FREQS.E3, d: e }, { f: NOTE_FREQS.E3, d: e },
+      // Bar 6 (F)
+      { f: NOTE_FREQS.F2, d: e }, { f: NOTE_FREQS.F2, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.F2, d: e }, { f: NOTE_FREQS.F2, d: e },
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      // Bar 7 (Dm -> G)
+      { f: NOTE_FREQS.D3, d: e }, { f: NOTE_FREQS.D3, d: e },
+      { f: NOTE_FREQS.A3, d: e }, { f: NOTE_FREQS.A3, d: e },
+      { f: NOTE_FREQS.G2, d: e }, { f: NOTE_FREQS.G2, d: e },
+      { f: NOTE_FREQS.D3, d: e }, { f: NOTE_FREQS.D3, d: e },
+      // Bar 8 (C)
+      { f: NOTE_FREQS.C3, d: e }, { f: NOTE_FREQS.C3, d: e },
+      { f: NOTE_FREQS.G2, d: e }, { f: NOTE_FREQS.G2, d: e },
+      { f: NOTE_FREQS.C3, d: h },
+    ];
+
+    this.playBgmTrack('STAGE_THEME', lead, harm, bass, true);
+  }
+
+  public playTitleBgm(): void {
+    const qT = 60 / 140; // 140 BPM fanfare
+    const eT = qT / 2;
+    const hT = qT * 2;
+
+    const lead: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C5, d: eT },
+      { f: NOTE_FREQS.G4, d: eT },
+      { f: NOTE_FREQS.E4, d: eT },
+      { f: NOTE_FREQS.G4, d: eT },
+      { f: NOTE_FREQS.C5, d: qT },
+      { f: NOTE_FREQS.G4, d: qT },
+      { f: NOTE_FREQS.D5, d: eT },
+      { f: NOTE_FREQS.G4, d: eT },
+      { f: NOTE_FREQS.F4, d: eT },
+      { f: NOTE_FREQS.G4, d: eT },
+      { f: NOTE_FREQS.D5, d: qT },
+      { f: NOTE_FREQS.G4, d: qT },
+      { f: NOTE_FREQS.E5, d: eT },
+      { f: NOTE_FREQS.D5, d: eT },
+      { f: NOTE_FREQS.C5, d: eT },
+      { f: NOTE_FREQS.D5, d: eT },
+      { f: NOTE_FREQS.E5, d: qT },
+      { f: NOTE_FREQS.G5, d: qT },
+      { f: NOTE_FREQS.C5, d: hT },
+      { f: 0, d: qT },
+    ];
+
+    const harm: ChiptuneNote[] = [
+      { f: NOTE_FREQS.E4, d: eT },
+      { f: NOTE_FREQS.C4, d: eT },
+      { f: NOTE_FREQS.G3, d: eT },
+      { f: NOTE_FREQS.C4, d: eT },
+      { f: NOTE_FREQS.E4, d: qT },
+      { f: NOTE_FREQS.E4, d: qT },
+      { f: NOTE_FREQS.F4, d: eT },
+      { f: NOTE_FREQS.D4, d: eT },
+      { f: NOTE_FREQS.B3, d: eT },
+      { f: NOTE_FREQS.D4, d: eT },
+      { f: NOTE_FREQS.F4, d: qT },
+      { f: NOTE_FREQS.F4, d: qT },
+      { f: NOTE_FREQS.G4, d: eT },
+      { f: NOTE_FREQS.F4, d: eT },
+      { f: NOTE_FREQS.E4, d: eT },
+      { f: NOTE_FREQS.F4, d: eT },
+      { f: NOTE_FREQS.G4, d: qT },
+      { f: NOTE_FREQS.B4, d: qT },
+      { f: NOTE_FREQS.E4, d: hT },
+      { f: 0, d: qT },
+    ];
+
+    const bass: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C3, d: eT }, { f: NOTE_FREQS.E3, d: eT },
+      { f: NOTE_FREQS.G3, d: eT }, { f: NOTE_FREQS.E3, d: eT },
+      { f: NOTE_FREQS.C3, d: qT }, { f: NOTE_FREQS.G3, d: qT },
+      { f: NOTE_FREQS.G2, d: eT }, { f: NOTE_FREQS.B2, d: eT },
+      { f: NOTE_FREQS.D3, d: eT }, { f: NOTE_FREQS.B2, d: eT },
+      { f: NOTE_FREQS.G2, d: qT }, { f: NOTE_FREQS.D3, d: qT },
+      { f: NOTE_FREQS.C3, d: eT }, { f: NOTE_FREQS.E3, d: eT },
+      { f: NOTE_FREQS.G3, d: eT }, { f: NOTE_FREQS.E3, d: eT },
+      { f: NOTE_FREQS.C3, d: qT }, { f: NOTE_FREQS.G2, d: qT },
+      { f: NOTE_FREQS.C3, d: hT },
+      { f: 0, d: qT },
+    ];
+
+    this.playBgmTrack('TITLE', lead, harm, bass, true);
+  }
+
+  public playGameOver(): void {
+    const lead: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C5, d: 0.22 },
+      { f: NOTE_FREQS.B4, d: 0.22 },
+      { f: NOTE_FREQS.As4, d: 0.22 },
+      { f: NOTE_FREQS.A4, d: 0.22 },
+      { f: NOTE_FREQS.Gs4, d: 0.32 },
+      { f: NOTE_FREQS.G4, d: 0.8 },
+    ];
+    const harm: ChiptuneNote[] = [
+      { f: NOTE_FREQS.E4, d: 0.22 },
+      { f: NOTE_FREQS.Ds4, d: 0.22 },
+      { f: NOTE_FREQS.D4, d: 0.22 },
+      { f: NOTE_FREQS.Cs4, d: 0.22 },
+      { f: NOTE_FREQS.C4, d: 0.32 },
+      { f: NOTE_FREQS.B3, d: 0.8 },
+    ];
+    const bass: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C3, d: 0.44 },
+      { f: NOTE_FREQS.Fs2, d: 0.44 },
+      { f: NOTE_FREQS.F2, d: 0.32 },
+      { f: NOTE_FREQS.C2, d: 0.8 },
+    ];
+
+    this.playBgmTrack('GAME_OVER', lead, harm, bass, false);
   }
 
   public playStageClear(): void {
+    const d = 0.11;
+    const lead: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C5, d },
+      { f: NOTE_FREQS.D5, d },
+      { f: NOTE_FREQS.E5, d },
+      { f: NOTE_FREQS.F5, d },
+      { f: NOTE_FREQS.G5, d: 0.16 },
+      { f: NOTE_FREQS.A5, d: 0.16 },
+      { f: NOTE_FREQS.B5, d: 0.16 },
+      { f: NOTE_FREQS.C6, d: 0.6 },
+    ];
+    const harm: ChiptuneNote[] = [
+      { f: 0, d: d * 4 },
+      { f: NOTE_FREQS.E5, d: 0.16 },
+      { f: NOTE_FREQS.F5, d: 0.16 },
+      { f: NOTE_FREQS.G5, d: 0.16 },
+      { f: NOTE_FREQS.E5, d: 0.6 },
+    ];
+    const bass: ChiptuneNote[] = [
+      { f: NOTE_FREQS.C3, d: d * 2 },
+      { f: NOTE_FREQS.G3, d: d * 2 },
+      { f: NOTE_FREQS.C4, d: 0.48 },
+      { f: NOTE_FREQS.C3, d: 0.6 },
+    ];
+
+    this.playBgmTrack('STAGE_CLEAR', lead, harm, bass, false);
+  }
+
+  public stopBgm(): void {
+    if (this.bgmTimer) {
+      clearTimeout(this.bgmTimer);
+      this.bgmTimer = null;
+    }
+    for (const osc of this.activeBgmOscillators) {
+      try {
+        osc.stop();
+        osc.disconnect();
+      } catch {}
+    }
+    this.activeBgmOscillators = [];
+    this._currentBgm = null;
+    this._isBgmPaused = false;
+  }
+
+  public pauseBgm(): void {
+    if (!this._currentBgm || this._isBgmPaused) return;
+    this._isBgmPaused = true;
     const ctx = this.getAudioContext();
-    if (!ctx || !this.masterGain) return;
+    if (ctx && this.bgmGain) {
+      try {
+        this.bgmGain.gain.setValueAtTime(0, ctx.currentTime);
+      } catch {}
+    }
+  }
 
-    try {
-      // 8-bit victory melody
-      const melody = [
-        { f: 523.25, d: 0.1 }, // C5
-        { f: 587.33, d: 0.1 }, // D5
-        { f: 659.25, d: 0.1 }, // E5
-        { f: 698.46, d: 0.1 }, // F5
-        { f: 783.99, d: 0.15 }, // G5
-        { f: 880.0, d: 0.15 },  // A5
-        { f: 987.77, d: 0.15 }, // B5
-        { f: 1046.5, d: 0.4 },  // C6
-      ];
-
-      let t = ctx.currentTime;
-      melody.forEach(({ f, d }) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-
-        osc.type = 'square';
-        osc.frequency.setValueAtTime(f, t);
-
-        gain.gain.setValueAtTime(0.22, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + d);
-
-        osc.connect(gain);
-        gain.connect(this.masterGain!);
-
-        osc.start(t);
-        osc.stop(t + d);
-
-        t += d;
-      });
-    } catch {
-      // Graceful fallback
+  public resumeBgm(): void {
+    if (!this._currentBgm || !this._isBgmPaused) return;
+    this._isBgmPaused = false;
+    const ctx = this.getAudioContext();
+    if (ctx && this.bgmGain) {
+      try {
+        this.bgmGain.gain.setValueAtTime(this.bgmVolume, ctx.currentTime);
+      } catch {}
     }
   }
 
@@ -448,7 +864,7 @@ export class AudioEngine implements IAudioEngine {
   }
 
   public stopAll(): void {
-    // Standard disposal of active nodes
+    this.stopBgm();
     if (this.ctx && this.masterGain) {
       try {
         this.masterGain.disconnect();
@@ -458,6 +874,10 @@ export class AudioEngine implements IAudioEngine {
           this.ctx.currentTime
         );
         this.masterGain.connect(this.ctx.destination);
+
+        this.bgmGain = this.ctx.createGain();
+        this.bgmGain.gain.setValueAtTime(this.bgmVolume, this.ctx.currentTime);
+        this.bgmGain.connect(this.masterGain);
       } catch {
         // Fallback
       }
@@ -474,6 +894,7 @@ export class AudioEngine implements IAudioEngine {
       }
       this.ctx = null;
       this.masterGain = null;
+      this.bgmGain = null;
     }
   }
 }

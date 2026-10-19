@@ -297,4 +297,77 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
       expect(player.stats.speed).toBe(1.0); // Automatically configured to SPEED_UP_SPEED
     });
   });
+
+  describe('Movement State (isMoving) & Authentic Leg Walk Cycling / Idle Freeze', () => {
+    it('sets isMoving = true and cycles walkFrame [0, 1, 0, 2] every 90ms when walking unobstructed', () => {
+      const grid = createStageGrid();
+      const player = new BombermanEntity();
+      player.update(500, null, grid); // complete spawn
+
+      // Initially idle
+      expect(player.isMoving).toBe(false);
+      expect(player.walkFrame).toBe(0);
+
+      // Walk RIGHT for 40ms (< 90ms): frame 0
+      player.update(40, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(0);
+
+      // Advance past 90ms (at 100ms total): frame 1 (left foot)
+      player.update(60, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(1);
+
+      // Advance past 180ms: frame 0 (feet together)
+      player.update(90, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(0);
+
+      // Advance past 270ms: frame 2 (right foot)
+      player.update(90, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(2);
+
+      // Advance past 360ms: cycles back to frame 0
+      player.update(90, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(0);
+    });
+
+    it('immediately freezes legs to frame 0 (IDLE) and resets walkAnimTimerMs when player stops', () => {
+      const grid = createStageGrid();
+      const player = new BombermanEntity();
+      player.update(500, null, grid);
+
+      // Walk until frame 1
+      player.update(120, 'RIGHT', grid);
+      expect(player.isMoving).toBe(true);
+      expect(player.walkFrame).toBe(1);
+
+      // Next tick: no input, stopped
+      player.update(16.666, null, grid);
+      expect(player.isMoving).toBe(false);
+      expect(player.walkFrame).toBe(0);
+      expect(player.walkAnimTimerMs).toBe(0);
+      expect(player.getSnapshot().isMoving).toBe(false);
+      expect(player.getSnapshot().walkFrame).toBe(0);
+    });
+
+    it('freezes legs to frame 0 (IDLE) when pressing against an impassable wall (0 displacement)', () => {
+      const grid = createStageGrid();
+      const player = new BombermanEntity();
+      player.update(500, null, grid);
+
+      // Position flush against left hard wall at x = 16.0
+      player.x = 16.0;
+      player.y = 16.0;
+
+      // Press LEFT directly against the wall
+      player.update(100, 'LEFT', grid);
+      expect(player.x).toBe(16.0); // No displacement
+      expect(player.isMoving).toBe(false);
+      expect(player.walkFrame).toBe(0);
+      expect(player.walkAnimTimerMs).toBe(0);
+    });
+  });
 });
