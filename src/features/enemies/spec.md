@@ -14,13 +14,13 @@ In strict compliance with:
 
 | Enemy Type | Sprite / Appearance | Base Points | Speed (px/tick at 60Hz) | Wallpass (Soft Blocks)? | AI Archetype & Behavior |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`BALLOM`** | Orange spherical balloon | 100 | `0.5 px/tick` (30 px/s) | **NO** | Pure random walk. Low intelligence. Changes direction at open intersections randomly. |
-| **`ONEAL`** | Blue onion-shaped creature | 200 | `0.75 px/tick` (45 px/s) / `1.0` burst | **NO** | Medium intelligence. Wanders randomly, but tracks player and accelerates to `1.0` when within 4 tiles Manhattan distance. |
-| **`DAHL`** | Red spinning barrel | 400 | `0.75 px/tick` (45 px/s) | **NO** | Erratic movement. Frequently alternates perpendicular directions, bouncing off obstacles. |
-| **`MINVO`** | Green aggressive face | 800 | `1.0 px/tick` (60 px/s) | **NO** | High intelligence. Direct path chase toward player. Turns immediately when player crosses corridor. |
-| **`OVAPE`** | Purple ghost with eyes | 1000 | `0.5 px/tick` (30 px/s) | **YES** | Ghost phase. Freely traverses destructible soft blocks (`SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`). Blocked only by `HARD_WALL`. |
+| **`BALLOM`** | Orange spherical balloon | 100 | `0.375 px/tick` (22.5 px/s) | **NO** | Pure random walk. Low intelligence. Changes direction at open intersections randomly. |
+| **`ONEAL`** | Blue onion-shaped creature | 200 | `0.5 px/tick` (30 px/s) / `0.75` burst | **NO** | Medium intelligence. Wanders randomly, but tracks player and accelerates to `0.75` when within 5 tiles Manhattan distance. |
+| **`DAHL`** | Red spinning barrel | 400 | `0.5 px/tick` (30 px/s) | **NO** | Erratic movement. Frequently alternates perpendicular directions, bouncing off obstacles. |
+| **`MINVO`** | Green aggressive face | 800 | `0.75 px/tick` (45 px/s) | **NO** | High intelligence. Direct path chase toward player. Turns immediately when player crosses corridor. |
+| **`OVAPE`** | Purple ghost with eyes | 1000 | `0.375 px/tick` (22.5 px/s) | **YES** | Ghost phase. Freely traverses destructible soft blocks (`SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`). Blocked only by `HARD_WALL`. |
 | **`KONDORIA`** | Blue floating amoeba | 2000 | `0.25 px/tick` (15 px/s) | **YES** | Very slow, relentless ghost chaser. Ignores soft blocks, always paths toward player along the shortest Manhattan vector. |
-| **`PONTAN`** | Orange spinning disc/sun | 4000 | `1.5 px/tick` (90 px/s) | **YES** | Super-fast ghost chaser. High lethality, rapid turn rate, phases through soft blocks. |
+| **`PONTAN`** | Orange spinning disc/sun | 8000 | `1.125 px/tick` (67.5 px/s) | **YES** | Super-fast ghost chaser. High lethality, rapid turn rate, phases through soft blocks. |
 
 ---
 
@@ -32,6 +32,28 @@ To prevent unfair instant deaths upon level start or respawn, enemies MUST NEVER
 $$\text{ManhattanDist}((tx, ty), (1, 1)) = |tx - 1| + |ty - 1| \ge 5$$
 
 Any tile where $|tx - 1| + |ty - 1| < 5$ is strictly forbidden for enemy spawning.
+
+### 3.2 Stage Enemy Roster Distribution Table (`getStageEnemyRoster(stage)`)
+
+| Stage | Enemy Roster | Total Enemies |
+| :--- | :--- | :--- |
+| **Stage 1** | `6 BALLOM` | 6 |
+| **Stage 2** | `3 BALLOM, 3 ONEAL` | 6 |
+| **Stage 3** | `2 BALLOM, 2 ONEAL, 2 DAHL` | 6 |
+| **Stage 4** | `1 BALLOM, 1 ONEAL, 2 DAHL, 2 MINVO` | 6 |
+| **Stage 5** | `1 BALLOM, 2 ONEAL, 3 DAHL, 1 MINVO, 1 OVAPE` | 8 |
+| **Stage 6** | `1 BALLOM, 1 ONEAL, 3 DAHL, 2 MINVO, 1 OVAPE` | 8 |
+| **Stage 7** | `2 ONEAL, 3 DAHL, 2 MINVO, 1 KONDORIA` | 8 |
+| **Stage 8** | `1 ONEAL, 2 DAHL, 4 MINVO, 1 KONDORIA` | 8 |
+| **Stage 9** | `1 ONEAL, 1 DAHL, 4 MINVO, 1 OVAPE, 1 KONDORIA` | 8 |
+| **Stage 10** | `1 ONEAL, 1 DAHL, 1 MINVO, 1 OVAPE, 3 KONDORIA, 1 PONTAN` | 8 |
+| **Stage 11+** | Cyclic scaled progression containing high-tier ghosts (`OVAPE`, `KONDORIA`, `PONTAN`) | 8 |
+
+### 3.3 Penalty Wave (Punishment Spawns)
+Exactly **8 `PONTAN`** enemies are spawned under any of the following statutory violations:
+1. An active explosion flame impacts a revealed door ([`DOOR_REVEALED`](file:///C:/Users/dedag/Desktop/Personal/bomberman/src/features/stage-grid/types.ts#L25)) or power-up ([`POWERUP_REVEALED`](file:///C:/Users/dedag/Desktop/Personal/bomberman/src/features/stage-grid/types.ts#L26)).
+2. The match countdown timer reaches zero (`TIME === 0`).
+The 8 `PONTAN` spawn outside the safe spawn zone and immediately hunt Bomberman at `1.125 px/tick` with full soft block wallpass.
 
 ### 3.2 Tile Qualification
 - **Standard Enemies (`BALLOM`, `ONEAL`, `DAHL`, `MINVO`):**

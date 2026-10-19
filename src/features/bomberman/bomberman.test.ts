@@ -18,48 +18,47 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
       expect(player.isInvulnerable).toBe(true);
     });
 
-    it('initializes stats with default values: 3 lives, base speed 1.0, 1 bomb, 1 flame range', () => {
+    it('initializes stats with default values: 3 lives, base speed 0.75, 1 bomb, 1 flame range', () => {
       const player = new BombermanEntity();
       expect(player.stats.lives).toBe(3);
-      expect(player.stats.speed).toBe(1.0);
+      expect(player.stats.speed).toBe(0.75);
       expect(player.stats.maxBombs).toBe(1);
       expect(player.stats.flameRange).toBe(1);
     });
   });
 
   describe('Speed & Sub-Pixel Physics', () => {
-    it('advances position by exactly 1.0 px/tick under BASE_SPEED', () => {
+    it('advances position by exactly 0.75 px/tick under BASE_SPEED', () => {
       const grid = createStageGrid();
       const player = new BombermanEntity();
       player.update(500, null, grid); // Complete spawning phase
 
       // Safe spawn has (2, 1) empty, so moving RIGHT is unobstructed
       player.update(16.666, 'RIGHT', grid);
-      expect(player.x).toBe(17.0);
+      expect(player.x).toBe(16.75);
       expect(player.y).toBe(16.0);
     });
 
-    it('advances position by exactly 1.5 px/tick with SPEED_UP powerup active', () => {
+    it('advances position by exactly 1.0 px/tick with SPEED_UP powerup active', () => {
       const grid = createStageGrid();
       const player = new BombermanEntity();
       player.update(500, null, grid); // Complete spawning
       player.stats.hasSpeedUp = true;
 
       player.update(16.666, 'RIGHT', grid);
-      expect(player.x).toBe(17.5);
+      expect(player.x).toBe(17.0);
     });
 
-    it('snaps flush to tile boundary when blocked at fractional speed 1.5 (Anti-Tunneling Snap-to-Tile)', () => {
+    it('snaps flush to tile boundary when blocked at fractional speed 0.75 (Anti-Tunneling Snap-to-Tile)', () => {
       const grid = createStageGrid();
       const player = new BombermanEntity();
       player.update(500, null, grid);
-      player.stats.hasSpeedUp = true; // Speed 1.5
 
       // Force player near left boundary wall (x = 0 is HARD_WALL, x=16 is corridor edge)
-      player.x = 17.0; // 1.0px away from wall
+      player.x = 16.5; // 0.5px away from wall
       player.y = 16.0;
 
-      // Move LEFT with speed 1.5: nextX would be 15.5, which collides with wall at x=0
+      // Move LEFT with speed 0.75: nextX would be 15.75, which collides with wall at x=0
       player.update(16.666, 'LEFT', grid);
 
       // Snap-to-tile must flush x exactly to (0 + 1) * 16 = 16.0
@@ -108,9 +107,9 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
 
       player.update(16.666, 'DOWN', grid);
 
-      // Must slide LEFT (x decreases by 1.0) and move DOWN (y increases by 1.0)
-      expect(player.x).toBe(19.0);
-      expect(player.y).toBe(17.0);
+      // Must slide LEFT (x decreases by 0.75) and move DOWN (y increases by 0.75)
+      expect(player.x).toBe(19.25);
+      expect(player.y).toBe(16.75);
     });
 
     it('activates Corner-Sliding when grazing pillar at (2,2) by 4 pixels moving DOWN from the other side (rx = 12 >= 10) -> slides RIGHT towards open corridor at (3,2)', () => {
@@ -127,9 +126,9 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
 
       player.update(16.666, 'DOWN', grid);
 
-      // Must slide RIGHT (x increases by 1.0) and move DOWN (y increases by 1.0)
-      expect(player.x).toBe(45.0);
-      expect(player.y).toBe(17.0);
+      // Must slide RIGHT (x increases by 0.75) and move DOWN (y increases by 0.75)
+      expect(player.x).toBe(44.75);
+      expect(player.y).toBe(16.75);
     });
 
     it('BLOCKS movement completely when hitting pillar at (2,2) head-on by 8 pixels (rx = 8 > 6) -> zero sliding, zero movement', () => {
@@ -165,9 +164,9 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
 
       player.update(16.666, 'RIGHT', grid);
 
-      // Must slide UP (y decreases by 1.0) and move RIGHT (x increases by 1.0)
-      expect(player.y).toBe(19.0);
-      expect(player.x).toBe(17.0);
+      // Must slide UP (y decreases by 0.75) and move RIGHT (x increases by 0.75)
+      expect(player.y).toBe(19.25);
+      expect(player.x).toBe(16.75);
     });
 
     it('BLOCKS horizontal movement completely when hitting pillar at (2,2) head-on by 8 pixels (ry = 8 > 6)', () => {
@@ -205,7 +204,7 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
       player.update(16.666, { primary: 'UP', secondary: 'RIGHT' }, grid);
 
       // Primary blocked, so secondary RIGHT executes
-      expect(player.x).toBe(17.0);
+      expect(player.x).toBe(16.75);
       expect(player.y).toBe(16.0);
     });
   });

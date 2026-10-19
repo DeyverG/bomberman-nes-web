@@ -41,21 +41,23 @@ export const ENEMY_BASE_SCORES: Readonly<Record<EnemyType, number>> = {
   MINVO: 800,
   OVAPE: 1000,
   KONDORIA: 2000,
-  PONTAN: 4000,
+  PONTAN: 8000,
 };
 
 /**
  * Official Speeds (pixels per tick at 60Hz)
  */
 export const ENEMY_BASE_SPEEDS: Readonly<Record<EnemyType, number>> = {
-  BALLOM: 0.5,
-  ONEAL: 0.75,
-  DAHL: 0.75,
-  MINVO: 1.0,
-  OVAPE: 0.5,
   KONDORIA: 0.25,
-  PONTAN: 1.5,
+  BALLOM: 0.375,
+  OVAPE: 0.375,
+  ONEAL: 0.5,
+  DAHL: 0.5,
+  MINVO: 0.75,
+  PONTAN: 1.125,
 };
+
+export const ONEAL_BURST_SPEED = 0.75;
 
 /**
  * Wallpass ability (can walk through destructible soft blocks)
@@ -142,11 +144,25 @@ export interface IEnemiesEngine {
   ): EnemyEntity | null;
 
   /**
+   * Returns the authentic enemy distribution roster for a stage.
+   */
+  getStageEnemyRoster(stage: number): readonly EnemyType[];
+
+  /**
    * Spawns the authentic stage enemy distribution for the specified stage number.
    */
   spawnStageEnemies(
     stage: number,
     grid: IStageGridEngine,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns the authentic NES penalty wave of 8 PONTAN enemies.
+   */
+  spawnPunishmentWave(
+    grid: IStageGridEngine,
+    player: IBombermanEntity,
     rng?: () => number
   ): readonly EnemyEntity[];
 

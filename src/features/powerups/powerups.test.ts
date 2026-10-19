@@ -42,15 +42,15 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       expect(player.stats.flameRange).toBe(MAX_FLAME_RANGE_CAP);
     });
 
-    it('SPEED_UP sets player.stats.speed to 1.5 and player.stats.hasSpeedUp to true', () => {
+    it('SPEED_UP sets player.stats.speed to 1.0 and player.stats.hasSpeedUp to true', () => {
       const engine = createPowerupEngine();
       const player = createBomberman();
       expect(player.stats.hasSpeedUp).toBe(false);
-      expect(player.stats.speed).toBe(1.0);
+      expect(player.stats.speed).toBe(0.75);
 
       engine.applyPowerup('SPEED_UP', player);
       expect(player.stats.hasSpeedUp).toBe(true);
-      expect(player.stats.speed).toBe(1.5);
+      expect(player.stats.speed).toBe(1.0);
     });
 
     it('WALLPASS sets player.stats.wallpass to true, allowing soft block traversal', () => {
@@ -227,11 +227,11 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       const engine = createPowerupEngine();
       const player = createBomberman();
       player.stats.hasSpeedUp = true;
-      player.stats.speed = 1.5;
+      player.stats.speed = 1.0;
 
       engine.handlePlayerDeath(player);
       expect(player.stats.hasSpeedUp).toBe(true);
-      expect(player.stats.speed).toBe(1.5);
+      expect(player.stats.speed).toBe(1.0);
     });
 
     it('resets DETONATOR (hasDetonator = false) upon player death', () => {

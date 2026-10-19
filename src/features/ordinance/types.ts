@@ -95,6 +95,11 @@ export interface IOrdinanceEngine {
   detonateOldestBomb(grid: IStageGridEngine, player?: IBombermanEntity): void;
 
   /**
+   * Detonates a specific bomb by ID and processes chain reactions iteratively using FIFO queue.
+   */
+  detonateBomb(bombId: number, grid: IStageGridEngine, player?: IBombermanEntity): void;
+
+  /**
    * Advances fuse timers, updates walk-off grace status, advances explosion frames,
    * triggers chain reactions, and evaluates flame lethality against player.
    */
@@ -123,6 +128,11 @@ export interface IOrdinanceEngine {
     ty: number,
     player: IBombermanEntity
   ): boolean;
+
+  /**
+   * Consumes and returns any pending punishment wave spawns triggered by flame impacts on door or powerup.
+   */
+  consumePendingPunishmentWaves(): number;
 
   /**
    * Resets all bombs and explosions to empty state.

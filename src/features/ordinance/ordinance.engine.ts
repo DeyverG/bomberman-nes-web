@@ -15,6 +15,7 @@ import {
 export class OrdinanceEngine implements IOrdinanceEngine {
   private _activeBombs: Bomb[] = [];
   private _activeExplosions: Explosion[] = [];
+  private _pendingPunishmentWaves = 0;
   private bombIdCounter = 0;
   private explosionIdCounter = 0;
 
@@ -169,7 +170,10 @@ export class OrdinanceEngine implements IOrdinanceEngine {
 
         // 5. Revealed Special Tiles: Early terminal stop
         if (tile === TileType.DOOR_REVEALED || tile === TileType.POWERUP_REVEALED) {
-          grid.detonateTile(rx, ry);
+          const detRes = grid.detonateTile(rx, ry);
+          if ('spawnPunishmentEnemies' in detRes && detRes.spawnPunishmentEnemies) {
+            this._pendingPunishmentWaves++;
+          }
           // Terminal flame segment placed on early stopping tile
           segments.push({ tx: rx, ty: ry, type: end });
           break;
@@ -313,9 +317,16 @@ export class OrdinanceEngine implements IOrdinanceEngine {
     return !bomb.ownerPassThrough;
   }
 
+  public consumePendingPunishmentWaves(): number {
+    const count = this._pendingPunishmentWaves;
+    this._pendingPunishmentWaves = 0;
+    return count;
+  }
+
   public clear(): void {
     this._activeBombs = [];
     this._activeExplosions = [];
+    this._pendingPunishmentWaves = 0;
   }
 }
 

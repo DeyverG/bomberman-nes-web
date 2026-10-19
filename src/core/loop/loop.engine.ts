@@ -9,6 +9,7 @@ export class GameLoopEngine implements IGameLoop {
   private readonly targetFps: number;
   private readonly fixedDeltaMs: number;
   private readonly maxAccumulatorMs: number;
+  private readonly isCustomMaxAccumulator: boolean;
   private readonly timeProvider: () => number;
   private readonly onUpdate: UpdateCallback;
   private readonly onRender?: RenderCallback;
@@ -26,6 +27,7 @@ export class GameLoopEngine implements IGameLoop {
     this.onRender = onRender;
     this.targetFps = config?.targetFps ?? DEFAULT_TARGET_FPS;
     this.fixedDeltaMs = 1000 / this.targetFps;
+    this.isCustomMaxAccumulator = config?.maxAccumulatorMs !== undefined;
     this.maxAccumulatorMs = config?.maxAccumulatorMs ?? DEFAULT_MAX_ACCUMULATOR_MS;
     this.timeProvider = config?.timeProvider ?? (() => (typeof performance !== 'undefined' ? performance.now() : Date.now()));
   }
@@ -88,8 +90,10 @@ export class GameLoopEngine implements IGameLoop {
       deltaMs = 0;
     }
 
-    // Spiral of Death clamp
-    if (deltaMs > this.maxAccumulatorMs) {
+    // Spiral of Death clamp (clamps to 33.33ms on large tab switch lag spike > 100ms)
+    if (deltaMs > 100 && !this.isCustomMaxAccumulator) {
+      deltaMs = Math.min(deltaMs, 33.33);
+    } else if (deltaMs > this.maxAccumulatorMs) {
       deltaMs = this.maxAccumulatorMs;
     }
 

@@ -5,8 +5,8 @@ import type { IStageGridEngine, TileCoord } from '../stage-grid/types';
  * Bomberman Entity Constants
  */
 export const PLAYER_SIZE = 16;
-export const BASE_SPEED = 1.0; // 1.0 px/tick at 60Hz
-export const SPEED_UP_SPEED = 1.5; // 1.5 px/tick at 60Hz
+export const BASE_SPEED = 0.75; // 0.75 px/tick at 60Hz (45 px/s)
+export const SPEED_UP_SPEED = 1.0; // 1.0 px/tick at 60Hz (60 px/s)
 export const SLIDE_THRESHOLD = 6; // 6px maximum overlap for corner slide assistance
 export const SPAWN_DURATION_MS = 500;
 export const DEATH_DURATION_MS = 1000;
