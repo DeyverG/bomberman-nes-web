@@ -13,9 +13,9 @@ import {
 } from './types';
 
 /**
- * Guaranteed canonical power-ups for stages 1 to 10 in NES Bomberman (1985).
+ * Guaranteed canonical power-ups for stages 1 to 50 in NES Bomberman (1985).
  */
-export const STAGE_POWERUP_TABLE: Record<number, PowerupType> = {
+export const STAGE_POWERUP_TABLE: Readonly<Record<number, PowerupType>> = {
   1: 'FIRE_UP',
   2: 'BOMB_UP',
   3: 'DETONATOR',
@@ -24,12 +24,52 @@ export const STAGE_POWERUP_TABLE: Record<number, PowerupType> = {
   6: 'BOMB_UP',
   7: 'FIRE_UP',
   8: 'DETONATOR',
-  9: 'BOMB_UP',
+  9: 'BOMBPASS',
   10: 'WALLPASS',
+  11: 'BOMB_UP',
+  12: 'BOMB_UP',
+  13: 'DETONATOR',
+  14: 'BOMB_UP',
+  15: 'FIRE_UP',
+  16: 'MYSTERY',
+  17: 'BOMB_UP',
+  18: 'BOMBPASS',
+  19: 'BOMB_UP',
+  20: 'WALLPASS',
+  21: 'BOMB_UP',
+  22: 'DETONATOR',
+  23: 'BOMB_UP',
+  24: 'FIRE_UP',
+  25: 'BOMB_UP',
+  26: 'MYSTERY',
+  27: 'FIRE_UP',
+  28: 'BOMB_UP',
+  29: 'DETONATOR',
+  30: 'FLAMEPASS',
+  31: 'WALLPASS',
+  32: 'BOMB_UP',
+  33: 'DETONATOR',
+  34: 'FIRE_UP',
+  35: 'BOMB_UP',
+  36: 'MYSTERY',
+  37: 'FIRE_UP',
+  38: 'BOMB_UP',
+  39: 'DETONATOR',
+  40: 'WALLPASS',
+  41: 'BOMB_UP',
+  42: 'FIRE_UP',
+  43: 'BOMB_UP',
+  44: 'DETONATOR',
+  45: 'BOMB_UP',
+  46: 'MYSTERY',
+  47: 'BOMB_UP',
+  48: 'BOMBPASS',
+  49: 'FLAMEPASS',
+  50: 'MYSTERY',
 };
 
 /**
- * Modulo sequence for stages > 10.
+ * Fallback modulo sequence for stages > 50.
  */
 export const EXTENDED_POWERUP_CYCLE: readonly PowerupType[] = [
   'BOMB_UP',
@@ -72,7 +112,7 @@ export class PowerupEngine implements IPowerupEngine {
     if (s in STAGE_POWERUP_TABLE) {
       return STAGE_POWERUP_TABLE[s];
     }
-    const cycleIndex = (s - 11) % EXTENDED_POWERUP_CYCLE.length;
+    const cycleIndex = (s - 51) % EXTENDED_POWERUP_CYCLE.length;
     return EXTENDED_POWERUP_CYCLE[cycleIndex >= 0 ? cycleIndex : 0];
   }
 

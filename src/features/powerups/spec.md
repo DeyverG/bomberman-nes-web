@@ -25,15 +25,20 @@ It is written in **pure TypeScript**, completely decoupled from React and DOM re
 
 In canonical NES Bomberman (1985), exactly ONE guaranteed power-up is concealed under a destructible brick on each stage:
 
-| Stage Number | Concealed Power-Up | Stage Number | Concealed Power-Up |
-| :--- | :--- | :--- | :--- |
-| **Stage 1** | `FIRE_UP` | **Stage 6** | `BOMB_UP` |
-| **Stage 2** | `BOMB_UP` | **Stage 7** | `FIRE_UP` |
-| **Stage 3** | `DETONATOR` | **Stage 8** | `DETONATOR` |
-| **Stage 4** | `SPEED_UP` | **Stage 9** | `BOMB_UP` |
-| **Stage 5** | `BOMB_UP` | **Stage 10** | `WALLPASS` |
+| Stage | Power-Up | Stage | Power-Up | Stage | Power-Up | Stage | Power-Up | Stage | Power-Up |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1** | `FIRE_UP` | **11** | `BOMB_UP` | **21** | `BOMB_UP` | **31** | `WALLPASS` | **41** | `BOMB_UP` |
+| **2** | `BOMB_UP` | **12** | `BOMB_UP` | **22** | `DETONATOR` | **32** | `BOMB_UP` | **42** | `FIRE_UP` |
+| **3** | `DETONATOR`| **13** | `DETONATOR`| **23** | `BOMB_UP` | **33** | `DETONATOR`| **43** | `DETONATOR`|
+| **4** | `SPEED_UP` | **14** | `BOMB_UP` | **24** | `FIRE_UP` | **34** | `FIRE_UP` | **44** | `BOMB_UP` |
+| **5** | `BOMB_UP` | **15** | `FIRE_UP` | **25** | `BOMB_UP` | **35** | `BOMB_UP` | **45** | `FIRE_UP` |
+| **6** | `BOMB_UP` | **16** | `MYSTERY` | **26** | `MYSTERY` | **36** | `MYSTERY` | **46** | `MYSTERY` |
+| **7** | `FIRE_UP` | **17** | `BOMB_UP` | **27** | `FIRE_UP` | **37** | `FIRE_UP` | **47** | `BOMB_UP` |
+| **8** | `DETONATOR`| **18** | `BOMBPASS` | **28** | `BOMB_UP` | **38** | `BOMB_UP` | **48** | `FIRE_UP` |
+| **9** | `BOMBPASS` | **19** | `BOMB_UP` | **29** | `DETONATOR`| **39** | `DETONATOR`| **49** | `DETONATOR`|
+| **10**| `WALLPASS` | **20** | `WALLPASS` | **30** | `FLAMEPASS`| **40** | `WALLPASS` | **50** | `MYSTERY` |
 
-*For stages $> 10$, a deterministic table or modulo rotation continues the authentic progression (e.g., cycling between Flamepass, Bombpass, Wallpass, Mystery, and Bomb/Fire upgrades).*
+*For stages $> 50$, the progression loops through the 50-stage cycle (`(stage - 1) % 50 + 1`).*
 
 ---
 
@@ -72,18 +77,23 @@ When Bomberman loses a life and transitions $\text{DYING} \to \text{DEAD}$:
 
 ---
 
-## 6. Exit Door Mechanics (`DOOR_REVEALED`)
+## 6. Exit Door Mechanics (`DOOR_REVEALED`), +1 Life, & Stage 50 Victory
 
 The Stage Exit Door is concealed under a destructible brick and revealed when the brick is incinerated by an explosion.
 
-### 6.1 Stage Clear Condition
+### 6.1 Stage Clear Condition & Rewards
 The stage is cleared and the player advances to the next stage if and only if:
 1. The door is uncovered: `grid.getTile(doorTx, doorTy) === TileType.DOOR_REVEALED`.
 2. All enemies on the stage have been eliminated:
    $$\text{enemiesRemaining} === 0$$
 3. Bomberman's threshold alignment with the door tile is within $\le 3\text{px}$:
    $$|player.x - doorTx \times 16| \le 3 \land |player.y - doorTy \times 16| \le 3$$
-- Dispatches: `{ type: 'STAGE_CLEARED', nextStage: currentStage + 1 }`.
+
+Upon clearing the stage:
+- **+1 Life Rule:** Awards $+1\text{ Life}$ (`player.stats.lives += 1`).
+- **Stage 50 Victory:** If the cleared stage is Stage 50 (`currentStage >= 50`), the game triggers the `'VICTORY'` session state with the classic NES victory screen:
+  `CONGRATULATIONS - YOU HAVE COMPLETED BOMBERMAN`.
+- Otherwise: Dispatches `{ type: 'STAGE_CLEARED', nextStage: currentStage + 1 }`.
 
 ### 6.2 Behavior When Enemies Still Alive
 If Bomberman steps onto `DOOR_REVEALED` while $\text{enemiesRemaining} > 0$:
@@ -91,4 +101,4 @@ If Bomberman steps onto `DOOR_REVEALED` while $\text{enemiesRemaining} > 0$:
 - The door remains completely inert and walkable. It does **NOT** spawn penalty enemies upon walking over it.
 - Returns `null`.
 
-*(Note: The punishment wave of enemies `DOOR_HIT_BY_FLAME` occurs strictly if a bomb explosion flame ray impacts a revealed door or revealed powerup).*
+*(Note: The punishment wave of enemies `DOOR_HIT_BY_FLAME` occurs strictly if a bomb explosion flame ray impacts a revealed door or revealed powerup, triggering `enemiesEngine.spawnTrapWave(currentStage, tx, ty)`).*

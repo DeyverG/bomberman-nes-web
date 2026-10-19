@@ -1,7 +1,7 @@
 # Specification: Enemy Subsystem & Artificial Intelligence (`src/features/enemies/`)
 
 ## 1. Architectural Scope & Decoupling
-The `src/features/enemies/` module governs the catalog of 7 canonical NES Bomberman (1985) enemies, their spawn exclusion geometry, deterministic grid-aligned movement, AI pathfinding, simultaneous bomb kill combo scoring, death decay animations, and lethality against Bomberman.
+The `src/features/enemies/` module governs the catalog of 8 canonical NES Bomberman (1985) enemies, their spawn exclusion geometry, deterministic grid-aligned movement, AI pathfinding, simultaneous bomb kill combo scoring, death decay animations, and lethality against Bomberman.
 
 In strict compliance with:
 - **`screaming-game-arch`**: Module lives exclusively in `src/features/enemies/` with explicit domain contracts (`types.ts`, `spec.md`, `enemies.test.ts`).
@@ -14,29 +14,99 @@ In strict compliance with:
 
 | Enemy Type | Sprite / Appearance | Base Points | Speed (px/tick at 60Hz) | Wallpass (Soft Blocks)? | AI Archetype & Behavior |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`BALLOM`** | Orange spherical balloon | 100 | `0.5 px/tick` (30 px/s) | **NO** | Pure random walk. Low intelligence. Changes direction at open intersections randomly. |
-| **`ONEAL`** | Blue onion-shaped creature | 200 | `0.75 px/tick` (45 px/s) / `1.0` burst | **NO** | Medium intelligence. Wanders randomly, but tracks player and accelerates to `1.0` when within 4 tiles Manhattan distance. |
-| **`DAHL`** | Red spinning barrel | 400 | `0.75 px/tick` (45 px/s) | **NO** | Erratic movement. Frequently alternates perpendicular directions, bouncing off obstacles. |
-| **`MINVO`** | Green aggressive face | 800 | `1.0 px/tick` (60 px/s) | **NO** | High intelligence. Direct path chase toward player. Turns immediately when player crosses corridor. |
-| **`OVAPE`** | Purple ghost with eyes | 1000 | `0.5 px/tick` (30 px/s) | **YES** | Ghost phase. Freely traverses destructible soft blocks (`SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`). Blocked only by `HARD_WALL`. |
-| **`KONDORIA`** | Blue floating amoeba | 2000 | `0.25 px/tick` (15 px/s) | **YES** | Very slow, relentless ghost chaser. Ignores soft blocks, always paths toward player along the shortest Manhattan vector. |
-| **`PONTAN`** | Orange spinning disc/sun | 4000 | `1.5 px/tick` (90 px/s) | **YES** | Super-fast ghost chaser. High lethality, rapid turn rate, phases through soft blocks. |
+| **`BALLOM`** | Orange spherical balloon | 100 | `0.375 px/tick` (22.5 px/s) | **NO** | Pure random walk. Low intelligence. Changes direction at open intersections randomly. |
+| **`ONEAL`** | Blue onion-shaped creature | 200 | `0.5 px/tick` (30 px/s) / `0.75` burst | **NO** | Medium intelligence. Wanders randomly, but tracks player and accelerates to `0.75` when within $\le 4$ tiles Manhattan distance. |
+| **`DAHL`** | Red spinning barrel | 400 | `0.625 px/tick` (37.5 px/s) | **NO** | Erratic movement. Frequently alternates perpendicular directions, bouncing off obstacles. |
+| **`MINVO`** | Green aggressive face | 800 | `0.75 px/tick` (45 px/s) | **NO** | High intelligence. Direct path chase toward player. Turns immediately when player crosses corridor. |
+| **`KONDORIA`** | Blue floating amoeba | 1000 | `0.25 px/tick` (15 px/s) | **YES** | Very slow, relentless ghost chaser. Ignores soft blocks, always paths toward player along the shortest Manhattan vector. |
+| **`OVAPE`** | Purple ghost with eyes | 2000 | `0.375 px/tick` (22.5 px/s) | **YES** | Ghost phase. Freely traverses destructible soft blocks (`SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`). Blocked only by `HARD_WALL`. |
+| **`PASS`** | Orange/yellow lion face | 4000 | `1.0 px/tick` (60 px/s) | **NO** | Ultra-fast aggressive predator. Chases player through open corridors without crossing soft blocks. |
+| **`PONTAN`** | Orange spinning disc/sun | 8000 | `1.125 px/tick` (67.5 px/s) | **YES** | Super-fast ghost chaser. High lethality, rapid turn rate, phases through soft blocks. |
 
 ---
 
 ## 3. Spawn Exclusion Geometry & Candidate Pool
 
-### 3.1 Player Safe Spawn Zone
+### 3.1 Player Safe Spawn Zone & Line-of-Sight Corridor
 Bomberman spawns at tile $(1, 1)$, world coordinates $(16, 16)$.
-To prevent unfair instant deaths upon level start or respawn, enemies MUST NEVER spawn within a Manhattan distance $< 5$ tiles from player spawn:
-$$\text{ManhattanDist}((tx, ty), (1, 1)) = |tx - 1| + |ty - 1| \ge 5$$
+To reproduce the authentic safe opening feeling of NES Bomberman:
+1. **Initial Distance Threshold:** Enemies spawned at the start of a stage must maintain a Manhattan distance $\ge 8$ tiles from $(1, 1)$:
+   $$\text{ManhattanDist}((tx, ty), (1, 1)) = |tx - 1| + |ty - 1| \ge 8$$
+   *(Fallback to $\ge 5$ is permitted only if the qualifying tile pool has fewer candidates than the stage roster).*
+2. **Line-of-Sight Exclusion Corridor:** No enemy may spawn on row $ty = 1$ with $tx < 8$, nor on column $tx = 1$ with $ty < 7$, preventing immediate horizontal or vertical line-of-sight rushes at $(1, 1)$.
+3. **Mid-Stage Spawns (Penalties / Traps):** Minimum Manhattan distance $\ge 5$ tiles from Bomberman's current center tile.
 
-Any tile where $|tx - 1| + |ty - 1| < 5$ is strictly forbidden for enemy spawning.
+### 3.2 Canonical NES 50-Stage Enemy Rosters (`STAGE_ENEMY_ROSTERS`)
 
-### 3.2 Tile Qualification
-- **Standard Enemies (`BALLOM`, `ONEAL`, `DAHL`, `MINVO`):**
+| Stage | Enemy Roster | Total |
+| :--- | :--- | :--- |
+| **Stage 1** | `6 BALLOM` *(Strictly Balloms only)* | 6 |
+| **Stage 2** | `3 BALLOM, 3 ONEAL` | 6 |
+| **Stage 3** | `2 BALLOM, 2 ONEAL, 2 DAHL` | 6 |
+| **Stage 4** | `1 BALLOM, 1 ONEAL, 2 DAHL, 2 MINVO` | 6 |
+| **Stage 5** | `4 ONEAL, 3 DAHL` | 7 |
+| **Stage 6** | `2 ONEAL, 2 DAHL, 2 MINVO, 1 KONDORIA` | 7 |
+| **Stage 7** | `2 ONEAL, 3 DAHL, 2 KONDORIA` | 7 |
+| **Stage 8** | `1 ONEAL, 2 DAHL, 4 MINVO` | 7 |
+| **Stage 9** | `1 ONEAL, 1 DAHL, 4 MINVO, 1 KONDORIA` | 7 |
+| **Stage 10** | `1 ONEAL, 1 DAHL, 1 MINVO, 3 KONDORIA, 1 OVAPE` | 7 |
+| **Stage 11** | `1 ONEAL, 2 DAHL, 3 MINVO, 1 KONDORIA, 1 OVAPE` | 8 |
+| **Stage 12** | `1 ONEAL, 1 DAHL, 1 MINVO, 4 KONDORIA, 1 OVAPE` | 8 |
+| **Stage 13** | `3 DAHL, 3 MINVO, 2 KONDORIA` | 8 |
+| **Stage 14** | `7 OVAPE, 1 PASS` | 8 |
+| **Stages 15–49** | Progressively escalated compositions of `DAHL`, `MINVO`, `KONDORIA`, `OVAPE`, `PASS`, and `PONTAN`. | 8 |
+| **Stage 50** | `4 PASS, 4 PONTAN` | 8 |
+
+### 3.3 Canonical NES Punishment Mechanics: TIME = 0:00 (Pontan Horde) & Door/Powerup Trap
+
+#### 3.3.0 Límite Duro de Slots de Memoria en NES (`MAX_ACTIVE_ENEMIES = 10`)
+- En la arquitectura de la ROM de NES Bomberman (1985), la tabla de entidades en memoria RAM posee un tope estricto de **10 slots para enemigos**.
+- En ningún momento puede haber más de `MAX_ACTIVE_ENEMIES = 10` enemigos vivos (`state === 'ALIVE'`) simultáneamente en el nivel.
+- Cualquier generación dinámica (hordas de tiempo, trampas de puerta o power-up) trunca estrictamente su cuenta para jamás superar este límite.
+
+#### 3.3.1 Reloj en TIME = 0:00 (Horda Masiva de Pontans y Farming de Puntos)
+- Cuando el temporizador de la fase (`stageTimeRemaining`) desciende a `0`, el reloj se detiene en `0` y Bomberman **NO muere automáticamente** (`player.state === 'ALIVE'`).
+- Se activa la bandera `timeOutTriggered = true` (exactamente una sola vez por intento de nivel) y se invoca `enemies.spawnTimeOutHorde(grid, playerPos)`:
+  - Llena los slots de memoria disponibles hasta alcanzar exactamente el límite de **`MAX_ACTIVE_ENEMIES = 10` enemigos activos en el mapa**:
+    $$\text{countToSpawn} = \max(0, \text{MAX\_ACTIVE\_ENEMIES} - \text{aliveCount})$$
+  - Si había 0 enemigos vivos al expirar el tiempo, nacen exactamente 10 `PONTAN`. Si quedaban por ejemplo 4 enemigos vivos, nacen únicamente 6 `PONTAN` (total 10 en el mapa). Si ya había 10 enemigos vivos, no se instancian nuevos.
+  - Aparecen distribuidos en coordenadas válidas del mapa (incluyendo la casilla de la puerta si ha sido revelada y los bordes del mapa), respetando estrictamente una distancia Manhattan $\ge 5$ respecto a la posición actual de Bomberman (`playerPos`) para garantizar margen de reacción táctica.
+  - El jugador puede maniobrar, esquivar y detonar bombas para destruir a los `PONTAN`, obteniendo 8000 puntos base por cada uno más los multiplicadores de combo simultáneo ($1\times, 2\times, 4\times, 8\times$).
+  - Una vez que todos los enemigos son derrotados (`enemies.getAliveCount() === 0`), Bomberman puede ingresar libremente a la puerta de salida para ganar la fase (`STAGE_CLEARED`).
+
+#### 3.3.2 Trampa de la Puerta (`DOOR_REVEALED`) y del Power-Up (`POWERUP_REVEALED`)
+- Cuando la llama de una explosión alcanza la casilla de una puerta revelada (`DOOR_REVEALED`):
+  - La puerta **NO se destruye**.
+  - Invoca `enemies.spawnTrapWave(stage, doorTx, doorTy)` -> `enemies.spawnFromTile(doorTx, doorTy, 8, enemyType)`.
+  - Nacen **desde la misma coordenada exacta $(tx, ty)$** una cantidad de enemigos escalados según el Stage, limitada por la cuenta actual de enemigos vivos para no saturar el mapa ni superar el límite de 8 enemigos simultáneos:
+    $$\text{countToSpawn} = \max(0, \min(8, 8 - \text{aliveCount}))$$
+    - Si quedaban **0** enemigos vivos y se golpea la puerta/power-up: salen exactamente **8** enemigos desde $(tx, ty)$.
+    - Si quedaban **5** enemigos vivos: solo salen **3** nuevos (alcanzando exactamente el total de 8 en el mapa).
+    - Si quedaban **6** enemigos vivos: solo salen **2** nuevos (total 8 en el mapa, respetando el límite de 8 y el cap duro de `MAX_ACTIVE_ENEMIES = 10`).
+    - Si ya hay **8 o más** enemigos vivos: no nace ninguno adicional ($\text{countToSpawn} = 0$).
+  - Tipos escalados según el Stage:
+    - **Stage 1:** `ONEAL`
+    - **Stage 2:** `DAHL`
+    - **Stage 3:** `MINVO`
+    - **Stage 4:** `KONDORIA`
+    - **Stages 5–6:** `OVAPE`
+    - **Stages 7–9:** `PASS`
+    - **Stages 10+:** `PONTAN`
+  - Los nuevos enemigos incrementan inmediatamente `aliveCount`, bloqueando la puerta de salida hasta que el jugador vuelva a eliminarlos a todos.
+- Cuando la llama alcanza un potenciador revelado (`POWERUP_REVEALED`):
+  - El ítem se calcina y desaparece, transformando la casilla en `TileType.EMPTY`.
+  - También invoca `enemies.spawnTrapWave(stage, tx, ty)`, aplicando la misma fórmula de $\max(0, \min(8, 8 - \text{aliveCount}))$.
+
+#### 3.3.3 Inmunidad de Nacimiento en Trampas (`spawnImmunityMs = 520`)
+- Para evitar el exploit de que la misma explosión de $480\text{ ms}$ que detonó la trampa de la puerta o del power-up destruya instantáneamente a los 8 enemigos recién invocados en el mismo fotograma:
+  - Todo enemigo instanciado vía `spawnFromTile` nace con `spawnImmunityMs = 520`.
+  - Mientras `spawnImmunityMs > 0`, el enemigo no puede ser dañado ni destruido por ninguna flama (`checkFlameCollisions` lo ignora).
+  - El contador se reduce con cada tick (`deltaMs`) hasta llegar a 0, garantizando que sobrevivan a la flama originaria y requieran combate activo.
+
+### 3.4 Tile Qualification
+- **Standard Enemies (`BALLOM`, `ONEAL`, `DAHL`, `MINVO`, `PASS`):**
   Must spawn on tiles that are `TileType.EMPTY` (walkable ground, no hard walls, no soft blocks).
-- **Ghost Enemies (`OVAPE`, `KONDORIA`, `PONTAN`):**
+- **Ghost Enemies (`KONDORIA`, `OVAPE`, `PONTAN`):**
   May spawn on `TileType.EMPTY` or inside `TileType.SOFT_BLOCK` tiles outside the exclusion zone.
 - Coordinates at spawn are snapped exactly to tile pixel origin:
   $$x = tx \times 16.0, \quad y = ty \times 16.0$$
@@ -57,16 +127,104 @@ Enemies with fractional speeds (e.g., $0.5$, $0.75$, $0.25$, $1.5$) must never o
 - In each step with speed $s$:
   - If advancing by $s$ would cross a $16\text{px}$ boundary (e.g., $(pos + s) \ge (tile + 1) \times 16$ or $(pos - s) \le tile \times 16$), the movement snaps exactly to $tile \times 16$, and the intersection decision logic is executed.
 
-### 4.3 Obstacle Collision & Direction Fallback
+### 4.3 Obstacle Collision, Trapped State & Direction Decision (`chooseNextDirection`)
 A tile $(tx, ty)$ is impassable for an enemy if:
 1. `!grid.isInBounds(tx, ty)` $\implies$ Blocked.
 2. `grid.getTile(tx, ty) === TileType.HARD_WALL` $\implies$ Blocked.
 3. `grid.getTile(tx, ty)` is a soft block or burning block AND `enemy.hasWallpass === false` $\implies$ Blocked.
 4. An active solid bomb occupies tile $(tx, ty)$ $\implies$ Blocked.
 
-If an enemy faces an obstacle ahead at an intersection:
-- It eliminates the blocked direction from its candidate list.
-- If all forward and perpendicular directions are blocked, it reverses direction ($180^\circ$ turn).
+#### 4.3.1 Regla de Encierro Total (`Trapped State` cuando `validDirs.length === 0` - Ley 1)
+- En `chooseNextDirection()`, se evalúan las 4 direcciones cardinales con `canEnemyEnterTile(nx, ny, enemy, grid, bombs)`.
+- Si **ninguna** de las 4 direcciones es transitable (`validDirs.length === 0`, por ejemplo al estar encerrado entre pilares, un `SOFT_BLOCK` y una bomba recién plantada):
+  - El enemigo **NO puede avanzar en ninguna dirección**.
+  - Clava su posición en el origen de su casilla actual ($x = tx \times 16.0$, $y = ty \times 16.0$), manteniendo su desplazamiento de este tick en `0`.
+  - Fuerza `enemy.lastDecisionTx = -1; enemy.lastDecisionTy = -1;` para re-evaluar en el siguiente tick si la bomba explotó o si el camino se abrió.
+  - **PROHIBIDO** usar `reverseDir` a ciegas como fallback si `!canEnemyEnterTile(reverseTx, reverseTy)`. Solo se puede elegir `reverseDir` si realmente forma parte de `validDirs`.
+
+#### 4.3.2 Guardia de Colisión Dura en el Borde Delantero en Cada Tick (`Hard Leading-Edge Collision Guard` - Ley 2)
+- Todo enemigo con `wallpass === false` **NUNCA** puede penetrar ni $0.1\text{px}$ dentro de un `SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`, `HARD_WALL` o bomba activa.
+- Antes de sumar o restar `speed` a `enemy.x` o `enemy.y` en cada tick, calcula la casilla que tocaría el borde delantero de su caja física de $16\times 16\text{px}$:
+  - `RIGHT`: `leadTx = Math.floor((enemy.x + step + 15.999) / 16)`, `leadTy = Math.floor((enemy.y + 8) / 16)`
+  - `LEFT`: `leadTx = Math.floor((enemy.x - step) / 16)`, `leadTy = Math.floor((enemy.y + 8) / 16)`
+  - `DOWN`: `leadTx = Math.floor((enemy.x + 8) / 16)`, `leadTy = Math.floor((enemy.y + step + 15.999) / 16)`
+  - `UP`: `leadTx = Math.floor((enemy.x + 8) / 16)`, `leadTy = Math.floor((enemy.y - step) / 16)`
+- Si $(leadTx \neq currentTx \lor leadTy \neq currentTy)$ y `!canEnemyEnterTile(leadTx, leadTy, enemy, grid, bombs)`:
+  - Cancela el avance hacia esa casilla.
+  - Clava de inmediato la posición del enemigo al origen de la casilla válida actual ($x = currentTx \times 16.0$ o $y = currentTy \times 16.0$).
+  - Resetea `enemy.lastDecisionTx = -1; enemy.lastDecisionTy = -1;` y llama de inmediato a la toma de decisión (`chooseNextDirection`). Si no hay salida, se queda inmóvil en el origen de la casilla.
+
+### 4.4 Immediate Bomb Rebound & Enclosure Mechanics (Ley 3)
+- Cuando una bomba es plantada frente a un enemigo que se mueve hacia la casilla $B$ (incluso a medio camino entre $A$ y $B$, con $x \pmod{16} \neq 0$ o $y \pmod{16} \neq 0$):
+  - El enemigo **CANNOT enter the bomb tile**.
+  - Al detectar la bomba, se clava de inmediato en el origen de la casilla actual $A$ ($tx_A \times 16.0, ty_A \times 16.0$).
+  - Invierte su orientación $180^\circ$ lejos de la bomba o ejecuta `chooseNextDirection` para verificar si detrás de $A$ hay un `SOFT_BLOCK` o pared antes de desplazarse.
+  - La Guardia de Borde Delantero garantiza que si detrás de $A$ hay un `SOFT_BLOCK` o muro indestructible, el enemigo jamás atravesará el bloque, quedando herméticamente atrapado.
+
+### 4.5 AI State Tracking Counters (`EnemyEntity` & `EnemySnapshot`)
+To reproduce authentic NES corridor sweeping without chaotic erratic turning:
+1. `tilesWalkedInCurrentDir: number`:
+   - Increments by $+1$ each time the enemy snaps to a new tile intersection along its current direction vector.
+   - Resets strictly to $0$ whenever the enemy changes direction (including $180^\circ$ turnaround or perpendicular turns).
+2. `reversalQuota: number`:
+   - An integer quota assigned upon spawning and refreshed whenever direction changes.
+   - For `DAHL`: randomly drawn in $[2, 4]$.
+   - For `OVAPE`: randomly drawn in $[3, 6]$.
+   - For all other archetypes: randomly drawn in $[2, 6]$.
+
+### 4.6 Initial Spawn Axis Selection (`chooseInitialDirection`)
+Upon spawning at $(tx, ty)$:
+- Inspects which cardinal directions are passable (`UP`, `DOWN`, `LEFT`, `RIGHT`).
+- When both horizontal (`LEFT`/`RIGHT`) and vertical (`UP`/`DOWN`) directions are available, chooses between the horizontal and vertical axis with equal 50/50 probability (`rng < 0.5`).
+- Guarantees natural dispersion across horizontal and vertical corridors from the start of the level.
+
+### 4.7 Canonical 8-Enemy Corridor Sweeping Decision Rules (NES 1985)
+
+#### 1. `BALLOM` (Orange Balloon — $0.375\text{ px/tick}$, `wallpass: false`)
+- **Corridor Inertia:** `BALLOM` **NEVER reverses ($180^\circ$) mid-corridor** while the tile ahead is open.
+- **Crossing Check:** If the forward tile is open, it continues straight. Only when `tilesWalkedInCurrentDir >= 3` and passing through an intersection with open perpendiculars does it evaluate a modest **20% probability** of turning perpendicular (80% maintains forward momentum).
+- **Obstacle Collision (End of Corridor):** If forward is blocked, splits **50% perpendicular** and **50% reverse ($180^\circ$)** when perpendiculars are available. In a dead-end, reverses 100%.
+
+#### 2. `ONEAL` (Blue Onion — $0.5\text{ px/tick}$ base / $0.65\text{ px/tick}$ alert, `wallpass: false`)
+- **Line-of-Sight Chasing (LOS):** If Bomberman is in the same row or column within $\le 8$ tiles without intervening obstacles or bombs, `ONEAL` accelerates to `ONEAL_BURST_SPEED = 0.65 px/tick` and steers directly toward the player.
+- **Corridor Sweeping & Mid-Corridor Reversals:** In an open corridor, once `tilesWalkedInCurrentDir >= reversalQuota`:
+  - With **45% probability**, reverses $180^\circ$ mid-corridor (or takes a perpendicular branch if closer to Bomberman).
+  - With 55% probability, continues straight until hitting an obstacle.
+- **Proximity Steering:** When within $\le 7$ tiles Manhattan distance of Bomberman, has a **65% probability** of picking an open axis that minimizes distance to the player.
+
+#### 3. `DAHL` (Red Barrel — $0.625\text{ px/tick}$, `wallpass: false`)
+- **Hyperkinetic Axis Alternation:** Rapidly sweeps corridors, constantly bouncing off walls.
+- Upon colliding with an obstacle or reaching its quota of $2$ to $4$ tiles:
+  - **70% probability** of turning into an open perpendicular corridor (alternating horizontal/vertical).
+  - **25% probability** of reversing $180^\circ$.
+  - **5% probability** of continuing straight if open.
+
+#### 4. `MINVO` (Agile Green Face — $0.75\text{ px/tick}$, `wallpass: false`)
+- **Relentless Corridor Chase:**
+  - If moving away from Bomberman along the current axis and `tilesWalkedInCurrentDir >= 2`, evaluates a **75% probability of immediately reversing ($180^\circ$)** to reorient toward the player.
+  - At any fork or intersection with an open branch approaching Bomberman, turns toward the player **80% of the time** (20% forward inertia).
+
+#### 5. `KONDORIA` (Slow Ghost Amoeba — $0.25\text{ px/tick}$, `wallpass: true`)
+- **Phasing Pathfinding:** Traverses `SOFT_BLOCK` freely, blocked strictly by `HARD_WALL` and active bombs.
+- At odd grid intersections $(tx \pmod 2 \neq 0 \land ty \pmod 2 \neq 0)$ or every $2$ to $4$ tiles:
+  - Evaluates Manhattan distance to Bomberman across all 4 cardinal directions.
+  - With **85% probability**, steers along the vector that minimizes Manhattan distance to the player.
+
+#### 6. `OVAPE` (Wandering Ghost — $0.375\text{ px/tick}$, `wallpass: true`)
+- **Soft Block Patrolling:** Moves straight through `SOFT_BLOCK` tiles.
+- Upon completing its quota of $3$ to $6$ tiles:
+  - **30% probability** of reversing $180^\circ$.
+  - **35% probability** of turning perpendicular (through blocks or open ground).
+  - **35% probability** of continuing straight.
+- At map perimeter or `HARD_WALL`: 50% turns perpendicular, 50% reverses.
+
+#### 7 & 8. `PASS` ($1.0\text{ px/tick}$, `wallpass: false`) & `PONTAN` ($1.125\text{ px/tick}$, `wallpass: true`)
+- **Elite Hunters with Instant Rear Detection:**
+  - If Bomberman is behind the entity (reverse direction decreases Manhattan distance) and reverse is open:
+    - Evaluates an immediate **90% probability of reversing ($180^\circ$) on the very next tile**.
+  - At every fork or intersection:
+    - Chooses the direction minimizing Manhattan distance to Bomberman with **90% accuracy** (10% momentum).
+- `PASS` is bounded by `SOFT_BLOCK`, while `PONTAN` phases through `SOFT_BLOCK` along the direct line of sight.
 
 ---
 
@@ -104,18 +262,21 @@ When an enemy's bounding box intersects an active explosion flame segment:
 
 ## 7. Lethality Against Bomberman
 
-### 7.1 Hitbox Intersection Contract
-- **Enemy Outer Bounding Box:**
-  $$\text{Box}_{enemy} = [x, x + 16] \times [y, y + 16]$$
-- **Bomberman Inner Vulnerability Hitbox ($12\times 12$ centered):**
-  $$\text{Hitbox}_{player} = [player.x + 2, player.x + 14] \times [player.y + 2, player.y + 14]$$
+### 7.1 Hitbox Intersection Contract: Core 8x8 Hurtbox
+- **Caja Física de Terreno ($16 \times 16\text{ px}$):**
+  $[x, y, 16, 16]$ se utiliza exclusivamente para colisión física contra muros y bombas sólidas.
+- **Hurtbox Letal Centrada ($8 \times 8\text{ px}$):**
+  Tanto Bomberman como cada enemigo poseen un núcleo letal de $8\times 8\text{ px}$ centrado en su sprite:
+  $$\text{Hurtbox}_{player} = [player.x + 4, player.x + 12] \times [player.y + 4, player.y + 12]$$
+  $$\text{Hurtbox}_{enemy} = [enemy.x + 4, enemy.x + 12] \times [enemy.y + 4, enemy.y + 12]$$
 
 ### 7.2 Lethality Trigger
 An enemy kills Bomberman if and only if:
 1. `enemy.state === 'ALIVE'`.
 2. `player.state === 'ALIVE'`.
 3. `!player.isInvulnerable` (i.e. not in `SPAWNING`, not `DYING`, not `DEAD`, and `player.stats.invincibleTimerMs === 0`).
-4. $\text{AABB}(\text{Box}_{enemy}, \text{Hitbox}_{player}) \text{ is true}$.
+4. $\text{AABB}(\text{Hurtbox}_{enemy}, \text{Hurtbox}_{player}) \text{ is true}$, lo que equivale matemáticamente a:
+   $$|player.x - enemy.x| < 8 \land |player.y - enemy.y| < 8$$
 
 When all conditions are met:
 - Triggers `player.kill()`.

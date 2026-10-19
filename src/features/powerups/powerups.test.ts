@@ -42,15 +42,15 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       expect(player.stats.flameRange).toBe(MAX_FLAME_RANGE_CAP);
     });
 
-    it('SPEED_UP sets player.stats.speed to 1.5 and player.stats.hasSpeedUp to true', () => {
+    it('SPEED_UP sets player.stats.speed to 1.0 and player.stats.hasSpeedUp to true', () => {
       const engine = createPowerupEngine();
       const player = createBomberman();
       expect(player.stats.hasSpeedUp).toBe(false);
-      expect(player.stats.speed).toBe(1.0);
+      expect(player.stats.speed).toBe(0.75);
 
       engine.applyPowerup('SPEED_UP', player);
       expect(player.stats.hasSpeedUp).toBe(true);
-      expect(player.stats.speed).toBe(1.5);
+      expect(player.stats.speed).toBe(1.0);
     });
 
     it('WALLPASS sets player.stats.wallpass to true, allowing soft block traversal', () => {
@@ -138,17 +138,24 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       expect(engine.getPowerupForStage(8)).toBe('DETONATOR');
     });
 
-    it('guarantees Stage 9 provides BOMB_UP', () => {
-      expect(engine.getPowerupForStage(9)).toBe('BOMB_UP');
+    it('guarantees Stage 9 provides BOMBPASS', () => {
+      expect(engine.getPowerupForStage(9)).toBe('BOMBPASS');
     });
 
     it('guarantees Stage 10 provides WALLPASS', () => {
       expect(engine.getPowerupForStage(10)).toBe('WALLPASS');
     });
 
-    it('provides cyclic deterministic power-ups for stages > 10', () => {
-      expect(typeof engine.getPowerupForStage(11)).toBe('string');
-      expect(typeof engine.getPowerupForStage(50)).toBe('string');
+    it('provides authentic canonical power-ups for stages up to 50', () => {
+      expect(engine.getPowerupForStage(14)).toBe('BOMB_UP');
+      expect(engine.getPowerupForStage(16)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(18)).toBe('BOMBPASS');
+      expect(engine.getPowerupForStage(20)).toBe('WALLPASS');
+      expect(engine.getPowerupForStage(26)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(30)).toBe('FLAMEPASS');
+      expect(engine.getPowerupForStage(36)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(46)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(50)).toBe('MYSTERY');
     });
   });
 
@@ -227,11 +234,11 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       const engine = createPowerupEngine();
       const player = createBomberman();
       player.stats.hasSpeedUp = true;
-      player.stats.speed = 1.5;
+      player.stats.speed = 1.0;
 
       engine.handlePlayerDeath(player);
       expect(player.stats.hasSpeedUp).toBe(true);
-      expect(player.stats.speed).toBe(1.5);
+      expect(player.stats.speed).toBe(1.0);
     });
 
     it('resets DETONATOR (hasDetonator = false) upon player death', () => {

@@ -1,4 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { createBomberman } from '../bomberman/bomberman.engine';
+import { createOrdinanceEngine } from '../ordinance/ordinance.engine';
+import { createPowerupEngine } from '../powerups/powerups.engine';
+import { createStageGrid } from '../stage-grid/stage-grid.engine';
+import { TileType } from '../stage-grid/types';
+import { createEnemiesEngine, getTrapEnemyTypeForStage } from './enemies.engine';
 import {
   ENEMY_BASE_SCORES,
   ENEMY_BASE_SPEEDS,
@@ -6,53 +12,59 @@ import {
   ENEMY_SIZE,
   ENEMY_WALLPASS_CAPABILITIES,
   EnemyType,
+  MAX_ACTIVE_ENEMIES,
   SPAWN_EXCLUSION_MANHATTAN_DISTANCE,
+  STAGE_SPAWN_INITIAL_MIN_DISTANCE,
 } from './types';
 
-describe('Enemy Subsystem & Artificial Intelligence (Specification Contract)', () => {
+describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
   describe('Canonical Enemy Catalog & Attributes', () => {
     const allEnemies: EnemyType[] = [
       'BALLOM',
       'ONEAL',
       'DAHL',
       'MINVO',
-      'OVAPE',
       'KONDORIA',
+      'OVAPE',
+      'PASS',
       'PONTAN',
     ];
 
-    it('contains exactly 7 canonical NES Bomberman enemies', () => {
-      expect(allEnemies).toHaveLength(7);
+    it('contains exactly 8 canonical NES Bomberman enemies', () => {
+      expect(allEnemies).toHaveLength(8);
     });
 
-    it('defines authentic base point values (100, 200, 400, 800, 1000, 2000, 4000)', () => {
+    it('defines authentic base point values (100, 200, 400, 800, 1000, 2000, 4000, 8000)', () => {
       expect(ENEMY_BASE_SCORES.BALLOM).toBe(100);
       expect(ENEMY_BASE_SCORES.ONEAL).toBe(200);
       expect(ENEMY_BASE_SCORES.DAHL).toBe(400);
       expect(ENEMY_BASE_SCORES.MINVO).toBe(800);
-      expect(ENEMY_BASE_SCORES.OVAPE).toBe(1000);
-      expect(ENEMY_BASE_SCORES.KONDORIA).toBe(2000);
-      expect(ENEMY_BASE_SCORES.PONTAN).toBe(4000);
+      expect(ENEMY_BASE_SCORES.KONDORIA).toBe(1000);
+      expect(ENEMY_BASE_SCORES.OVAPE).toBe(2000);
+      expect(ENEMY_BASE_SCORES.PASS).toBe(4000);
+      expect(ENEMY_BASE_SCORES.PONTAN).toBe(8000);
     });
 
     it('defines authentic movement speeds in px/tick at 60Hz', () => {
-      expect(ENEMY_BASE_SPEEDS.BALLOM).toBe(0.5);
-      expect(ENEMY_BASE_SPEEDS.ONEAL).toBe(0.75);
-      expect(ENEMY_BASE_SPEEDS.DAHL).toBe(0.75);
-      expect(ENEMY_BASE_SPEEDS.MINVO).toBe(1.0);
-      expect(ENEMY_BASE_SPEEDS.OVAPE).toBe(0.5);
+      expect(ENEMY_BASE_SPEEDS.BALLOM).toBe(0.375);
+      expect(ENEMY_BASE_SPEEDS.ONEAL).toBe(0.5);
+      expect(ENEMY_BASE_SPEEDS.DAHL).toBe(0.625);
+      expect(ENEMY_BASE_SPEEDS.MINVO).toBe(0.75);
       expect(ENEMY_BASE_SPEEDS.KONDORIA).toBe(0.25);
-      expect(ENEMY_BASE_SPEEDS.PONTAN).toBe(1.5);
+      expect(ENEMY_BASE_SPEEDS.OVAPE).toBe(0.375);
+      expect(ENEMY_BASE_SPEEDS.PASS).toBe(1.0);
+      expect(ENEMY_BASE_SPEEDS.PONTAN).toBe(1.125);
     });
 
-    it('grants soft block wallpass strictly to ghost enemies (OVAPE, KONDORIA, PONTAN)', () => {
+    it('grants soft block wallpass strictly to ghost enemies (KONDORIA, OVAPE, PONTAN)', () => {
       expect(ENEMY_WALLPASS_CAPABILITIES.BALLOM).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.ONEAL).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.DAHL).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.MINVO).toBe(false);
+      expect(ENEMY_WALLPASS_CAPABILITIES.PASS).toBe(false);
 
-      expect(ENEMY_WALLPASS_CAPABILITIES.OVAPE).toBe(true);
       expect(ENEMY_WALLPASS_CAPABILITIES.KONDORIA).toBe(true);
+      expect(ENEMY_WALLPASS_CAPABILITIES.OVAPE).toBe(true);
       expect(ENEMY_WALLPASS_CAPABILITIES.PONTAN).toBe(true);
     });
 
@@ -60,84 +72,1312 @@ describe('Enemy Subsystem & Artificial Intelligence (Specification Contract)', (
       expect(ENEMY_DEATH_DURATION_MS).toBe(600);
       expect(ENEMY_SIZE).toBe(16);
       expect(SPAWN_EXCLUSION_MANHATTAN_DISTANCE).toBe(5);
+      expect(STAGE_SPAWN_INITIAL_MIN_DISTANCE).toBe(8);
+      expect(MAX_ACTIVE_ENEMIES).toBe(10);
     });
   });
 
-  describe('Spawn Exclusion Geometry & Safe Zone (Contract)', () => {
-    // Pure mathematical validation of Manhattan safe spawn formula
-    const isInsideSafeZone = (tx: number, ty: number) => {
-      const dist = Math.abs(tx - 1) + Math.abs(ty - 1);
-      return dist < SPAWN_EXCLUSION_MANHATTAN_DISTANCE;
-    };
+  describe('Stage Enemy Rosters (getStageEnemyRoster)', () => {
+    const engine = createEnemiesEngine();
 
-    it('prohibits enemy spawning within Manhattan distance < 5 from player spawn (1, 1)', () => {
-      expect(isInsideSafeZone(1, 1)).toBe(true); // dist 0
-      expect(isInsideSafeZone(1, 2)).toBe(true); // dist 1
-      expect(isInsideSafeZone(2, 1)).toBe(true); // dist 1
-      expect(isInsideSafeZone(2, 2)).toBe(true); // dist 2
-      expect(isInsideSafeZone(3, 3)).toBe(true); // dist 4 (|3-1| + |3-1| = 4)
-      expect(isInsideSafeZone(4, 1)).toBe(true); // dist 3
-      expect(isInsideSafeZone(5, 1)).toBe(true); // dist 4
+    it('guarantees Stage 1 roster is strictly 6 BALLOM', () => {
+      const roster = engine.getStageEnemyRoster(1);
+      expect(roster).toHaveLength(6);
+      expect(roster.every((t) => t === 'BALLOM')).toBe(true);
     });
 
-    it('permits enemy spawning on tiles at Manhattan distance >= 5', () => {
-      expect(isInsideSafeZone(3, 4)).toBe(false); // dist 5 (|3-1| + |4-1| = 5) -> Valid spawn
-      expect(isInsideSafeZone(1, 6)).toBe(false); // dist 5 (|1-1| + |6-1| = 5) -> Valid spawn
-      expect(isInsideSafeZone(6, 1)).toBe(false); // dist 5 (|6-1| + |1-1| = 5) -> Valid spawn
-      expect(isInsideSafeZone(10, 5)).toBe(false); // dist 13 -> Valid spawn
+    it('guarantees Stage 2 roster is 3 BALLOM and 3 ONEAL', () => {
+      const roster = engine.getStageEnemyRoster(2);
+      expect(roster).toEqual(['BALLOM', 'BALLOM', 'BALLOM', 'ONEAL', 'ONEAL', 'ONEAL']);
     });
 
-    it.todo('spawnEnemy() returns null when target tile is inside the 5-tile Manhattan exclusion zone');
-    it.todo('spawnEnemy() rejects non-wallpass enemies on HARD_WALL and SOFT_BLOCK tiles');
-    it.todo('spawnEnemy() permits wallpass ghost enemies (OVAPE, KONDORIA, PONTAN) inside SOFT_BLOCK tiles outside safe zone');
-    it.todo('spawnEnemy() places enemy coordinates snapped to integer tile boundaries (x = tx * 16, y = ty * 16)');
-  });
-
-  describe('Grid-Aligned Movement & Intersection Turn Decision Algorithm (Contract)', () => {
-    it.todo('evaluates direction turns strictly when aligned to grid intersection (x % 16 === 0 && y % 16 === 0)');
-    it.todo('forces enemy to maintain current direction when traveling mid-corridor (x % 16 !== 0 || y % 16 !== 0)');
-    it.todo('applies anti-tunneling snap when fractional speed advancement crosses a 16px tile boundary');
-    it.todo('treats HARD_WALL as impassable for all 7 enemy types');
-    it.todo('treats SOFT_BLOCK as impassable for BALLOM, ONEAL, DAHL, and MINVO');
-    it.todo('treats active solid bombs as impassable obstacles for all walking enemies');
-    it.todo('forces a 180-degree turnaround when an enemy reaches a dead end');
-  });
-
-  describe('Simultaneous Bomb Combo Multiplier Math (Contract)', () => {
-    // Pure mathematical validation of combo progression formula
-    const calculateComboScore = (baseScore: number, killIndex: number) => {
-      let multiplier = 1;
-      if (killIndex === 2) multiplier = 2;
-      else if (killIndex === 3) multiplier = 4;
-      else if (killIndex >= 4) multiplier = 8;
-      return baseScore * multiplier;
-    };
-
-    it('calculates 1x, 2x, 4x, and 8x combo score progression accurately', () => {
-      const base = 100; // BALLOM
-      expect(calculateComboScore(base, 1)).toBe(100); // 1st kill = 1x
-      expect(calculateComboScore(base, 2)).toBe(200); // 2nd kill = 2x
-      expect(calculateComboScore(base, 3)).toBe(400); // 3rd kill = 4x
-      expect(calculateComboScore(base, 4)).toBe(800); // 4th kill = 8x
-      expect(calculateComboScore(base, 5)).toBe(800); // 5th+ kill = 8x
+    it('guarantees Stage 3 roster is 2 BALLOM, 2 ONEAL, 2 DAHL', () => {
+      const roster = engine.getStageEnemyRoster(3);
+      expect(roster).toEqual(['BALLOM', 'BALLOM', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL']);
     });
 
-    it.todo('awards combo multipliers sequentially when multiple enemies are hit by the same bomb explosion');
-    it.todo('resets combo sequence to 1x for a separate subsequent bomb explosion');
+    it('guarantees Stage 4 roster is 1 BALLOM, 1 ONEAL, 2 DAHL, 2 MINVO', () => {
+      const roster = engine.getStageEnemyRoster(4);
+      expect(roster).toEqual(['BALLOM', 'ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO']);
+    });
+
+    it('guarantees Stage 5 roster is 4 ONEAL, 3 DAHL', () => {
+      const roster = engine.getStageEnemyRoster(5);
+      expect(roster).toEqual(['ONEAL', 'ONEAL', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL']);
+    });
+
+    it('guarantees Stage 6 introduces KONDORIA', () => {
+      const roster = engine.getStageEnemyRoster(6);
+      expect(roster).toContain('KONDORIA');
+    });
+
+    it('guarantees Stage 10 roster contains OVAPE and 3 KONDORIA', () => {
+      const roster = engine.getStageEnemyRoster(10);
+      expect(roster).toContain('OVAPE');
+      expect(roster.filter((e) => e === 'KONDORIA')).toHaveLength(3);
+    });
+
+    it('guarantees Stage 14 contains 7 OVAPE and 1 PASS', () => {
+      const roster = engine.getStageEnemyRoster(14);
+      expect(roster.filter((e) => e === 'OVAPE')).toHaveLength(7);
+      expect(roster).toContain('PASS');
+    });
+
+    it('guarantees Stage 50 contains 4 PASS and 4 PONTAN', () => {
+      const roster = engine.getStageEnemyRoster(50);
+      expect(roster.filter((e) => e === 'PASS')).toHaveLength(4);
+      expect(roster.filter((e) => e === 'PONTAN')).toHaveLength(4);
+    });
   });
 
-  describe('Enemy Death Sequence (DYING State Contract)', () => {
-    it.todo('transitions enemy from ALIVE to DYING upon intersecting active explosion flame');
-    it.todo('immediately halts enemy movement velocity (speed = 0) during DYING state');
-    it.todo('tracks deathTimerMs for exactly 600ms before transitioning to DEAD');
-    it.todo('removes DEAD enemies from activeEnemies collection');
-    it.todo('prevents DYING and DEAD enemies from damaging Bomberman or re-triggering death');
+  describe('Spawn Exclusion Geometry & Safe Zone', () => {
+    it('spawnEnemy() returns null when target tile is inside the 5-tile Manhattan exclusion zone', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // (1, 1) is dist 0, (2, 2) is dist 2, (3, 3) is dist 4
+      expect(engine.spawnEnemy('BALLOM', 1, 1, grid)).toBeNull();
+      expect(engine.spawnEnemy('BALLOM', 1, 2, grid)).toBeNull();
+      expect(engine.spawnEnemy('BALLOM', 2, 1, grid)).toBeNull();
+      expect(engine.spawnEnemy('BALLOM', 3, 3, grid)).toBeNull();
+      expect(engine.spawnEnemy('BALLOM', 4, 1, grid)).toBeNull();
+      expect(engine.aliveCount).toBe(0);
+    });
+
+    it('spawnEnemy() rejects non-wallpass enemies on HARD_WALL and SOFT_BLOCK tiles', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      grid.setTile(6, 1, TileType.HARD_WALL);
+      expect(engine.spawnEnemy('BALLOM', 6, 1, grid)).toBeNull();
+
+      grid.setTile(6, 1, TileType.SOFT_BLOCK);
+      expect(engine.spawnEnemy('BALLOM', 6, 1, grid)).toBeNull();
+    });
+
+    it('spawnEnemy() permits wallpass ghost enemies (OVAPE, KONDORIA, PONTAN) inside SOFT_BLOCK tiles outside safe zone', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      grid.setTile(6, 1, TileType.SOFT_BLOCK);
+      const ghost = engine.spawnEnemy('OVAPE', 6, 1, grid);
+
+      expect(ghost).not.toBeNull();
+      expect(ghost?.type).toBe('OVAPE');
+      expect(ghost?.hasWallpass).toBe(true);
+    });
+
+    it('spawnEnemy() places enemy coordinates snapped to integer tile boundaries (x = tx * 16, y = ty * 16)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      grid.setTile(7, 3, TileType.EMPTY);
+      const enemy = engine.spawnEnemy('ONEAL', 7, 3, grid);
+
+      expect(enemy).not.toBeNull();
+      expect(enemy?.x).toBe(112.0);
+      expect(enemy?.y).toBe(48.0);
+    });
+
+    it('spawnStageEnemies() enforces Manhattan distance >= 8 and blocks direct line-of-sight in (1,1)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      const spawned = engine.spawnStageEnemies(1, grid);
+      expect(spawned).toHaveLength(6);
+      expect(spawned.every((e) => e.type === 'BALLOM')).toBe(true);
+
+      for (const enemy of spawned) {
+        const tx = Math.round(enemy.x / 16);
+        const ty = Math.round(enemy.y / 16);
+        const dist = Math.abs(tx - 1) + Math.abs(ty - 1);
+
+        // Manhattan distance must be >= 8 tiles
+        expect(dist).toBeGreaterThanOrEqual(STAGE_SPAWN_INITIAL_MIN_DISTANCE);
+
+        // Safe corridor: never on row ty === 1 with tx < 8
+        if (ty === 1) {
+          expect(tx).toBeGreaterThanOrEqual(8);
+        }
+        // Safe corridor: never on col tx === 1 with ty < 7
+        if (tx === 1) {
+          expect(ty).toBeGreaterThanOrEqual(7);
+        }
+      }
+    });
   });
 
-  describe('Lethality Against Bomberman (Contract)', () => {
-    it.todo('triggers player.kill() when an ALIVE enemy collides with Bomberman inner 12x12 hitbox');
-    it.todo('ignores collision when player is in SPAWNING invulnerability');
-    it.todo('ignores collision when player has active MYSTERY invulnerability (invincibleTimerMs > 0)');
-    it.todo('ignores collision when player is already DYING or DEAD');
+  describe('Grid-Aligned Movement & Anti-Tunneling Snap', () => {
+    it('applies anti-tunneling snap when fractional speed advancement crosses a 16px tile boundary', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      enemy.direction = 'RIGHT';
+      // Put enemy at 111.8 (0.2px away from 112.0)
+      enemy.x = 111.8;
+      // Moving RIGHT with speed 0.375: 111.8 + 0.375 = 112.175 >= 112.0
+      // Snap must clench enemy.x exactly to 112.0
+      engine.update(16.666, player, grid, ordinance);
+
+      expect(enemy.x).toBe(112.0);
+      expect(enemy.x % 16).toBe(0);
+    });
+
+    it('treats HARD_WALL as impassable for all 7 enemy types', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      // Enemy at (6, 1) facing RIGHT towards HARD_WALL at (7, 1)
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.HARD_WALL);
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(5, 1, TileType.EMPTY); // Reverse is open
+
+      const enemy = engine.spawnEnemy('PONTAN', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      enemy.direction = 'RIGHT';
+      enemy.x = 96.0;
+
+      // Update at intersection: forward is blocked by HARD_WALL, must turnaround to LEFT
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.direction).toBe('LEFT');
+    });
+
+    it('forces a 180-degree turnaround when an enemy reaches a dead end', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      // Dead end corridor: (6, 1) surrounded by walls on UP, DOWN, RIGHT
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.HARD_WALL);
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.HARD_WALL);
+      grid.setTile(5, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      enemy.direction = 'RIGHT';
+      enemy.x = 96.0;
+      enemy.y = 16.0;
+
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.direction).toBe('LEFT');
+    });
+  });
+
+  describe('Simultaneous Bomb Combo Multipliers (1x, 2x, 4x, 8x)', () => {
+    it('awards combo multipliers sequentially when multiple enemies are hit by the same bomb explosion', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      // Spawn 4 BALLOM enemies (base score = 100)
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+      grid.setTile(8, 1, TileType.EMPTY);
+      grid.setTile(9, 1, TileType.EMPTY);
+
+      const e1 = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      const e2 = engine.spawnEnemy('BALLOM', 7, 1, grid);
+      const e3 = engine.spawnEnemy('BALLOM', 8, 1, grid);
+      const e4 = engine.spawnEnemy('BALLOM', 9, 1, grid);
+
+      expect(e1).not.toBeNull();
+      expect(e2).not.toBeNull();
+      expect(e3).not.toBeNull();
+      expect(e4).not.toBeNull();
+
+      // Plant bomb at (6, 1) with range 5 and detonate
+      player.x = 96.0;
+      player.y = 16.0;
+      player.stats.flameRange = 5;
+
+      const bomb = ordinance.placeBomb(6, 1, player, grid);
+      expect(bomb).not.toBeNull();
+
+      ordinance.detonateBomb(bomb!.id, grid, player);
+      expect(ordinance.activeExplosions).toHaveLength(1);
+
+      const initialScore = player.stats.score;
+      const results = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+
+      expect(results).toHaveLength(4);
+      // 1st kill = 100 * 1 = 100
+      expect(results[0].multiplier).toBe(1);
+      expect(results[0].pointsAwarded).toBe(100);
+
+      // 2nd kill = 100 * 2 = 200
+      expect(results[1].multiplier).toBe(2);
+      expect(results[1].pointsAwarded).toBe(200);
+
+      // 3rd kill = 100 * 4 = 400
+      expect(results[2].multiplier).toBe(4);
+      expect(results[2].pointsAwarded).toBe(400);
+
+      // 4th kill = 100 * 8 = 800
+      expect(results[3].multiplier).toBe(8);
+      expect(results[3].pointsAwarded).toBe(800);
+
+      // Total added score = 100 + 200 + 400 + 800 = 1500
+      expect(player.stats.score).toBe(initialScore + 1500);
+    });
+  });
+
+  describe('Penalty Wave Spawns (spawnPunishmentWave)', () => {
+    it('spawns exactly 8 PONTAN enemies outside the player safe spawn zone', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      player.x = 16.0;
+      player.y = 16.0;
+
+      const wave = engine.spawnPunishmentWave(grid, player);
+      expect(wave).toHaveLength(8);
+      expect(wave.every((e) => e.type === 'PONTAN')).toBe(true);
+      expect(wave.every((e) => e.speed === 1.125)).toBe(true);
+      expect(wave.every((e) => e.hasWallpass === true)).toBe(true);
+    });
+  });
+
+  describe('Canonical NES TIME = 0:00 Pontan Horde & Farming (spawnTimeOutHorde)', () => {
+    it('spawns exactly 10 PONTAN enemies filling available slots up to MAX_ACTIVE_ENEMIES (10) with speed 1.125, wallpass true, and 8000 base points', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 16.0;
+      player.y = 16.0;
+
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(10);
+      expect(engine.getAliveCount()).toBe(10);
+      expect(horde.every((e) => e.type === 'PONTAN')).toBe(true);
+      expect(horde.every((e) => e.speed === 1.125)).toBe(true);
+      expect(horde.every((e) => e.hasWallpass === true)).toBe(true);
+      expect(horde.every((e) => e.baseScore === 8000)).toBe(true);
+      expect(horde.every((e) => e.state === 'ALIVE')).toBe(true);
+    });
+
+    it('spawns all 10 Pontans respecting Manhattan distance >= 5 from current Bomberman position', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Bomberman at tile (10, 5) -> world coords (160, 80)
+      player.x = 160.0;
+      player.y = 80.0;
+
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(10);
+
+      for (const enemy of horde) {
+        const enemyTx = Math.round(enemy.x / 16.0);
+        const enemyTy = Math.round(enemy.y / 16.0);
+        const dist = Math.abs(enemyTx - 10) + Math.abs(enemyTy - 5);
+        expect(dist).toBeGreaterThanOrEqual(5);
+      }
+    });
+
+    it('fills available slots with PONTAN up to exactly MAX_ACTIVE_ENEMIES = 10 without exceeding limit', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Pre-spawn 4 enemies outside safe zone
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+      grid.setTile(8, 1, TileType.EMPTY);
+      grid.setTile(9, 1, TileType.EMPTY);
+      engine.spawnEnemy('BALLOM', 6, 1, grid);
+      engine.spawnEnemy('BALLOM', 7, 1, grid);
+      engine.spawnEnemy('BALLOM', 8, 1, grid);
+      engine.spawnEnemy('BALLOM', 9, 1, grid);
+      expect(engine.getAliveCount()).toBe(4);
+
+      // TIME = 0:00 triggers: fills remaining 10 - 4 = 6 slots
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(6);
+      expect(engine.getAliveCount()).toBe(10);
+
+      // Triggering again when 10 are already alive spawns 0
+      const extraHorde = engine.spawnTimeOutHorde(grid, player);
+      expect(extraHorde).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(10);
+    });
+
+    it('does NOT automatically kill Bomberman when TIME reaches 0:00 and spawnTimeOutHorde is triggered', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+
+      expect(player.state).toBe('ALIVE');
+
+      // Trigger timeout horde
+      engine.spawnTimeOutHorde(grid, player);
+
+      // Bomberman is still alive, clock hit 0:00 without killing the player
+      expect(player.state).toBe('ALIVE');
+      expect(engine.getAliveCount()).toBe(10);
+    });
+
+    it('allows player to farm Pontans for 8000 points base + combos and clear stage once count hits 0', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+      const ordinance = createOrdinanceEngine();
+      const powerups = createPowerupEngine();
+
+      player.x = 16.0;
+      player.y = 16.0;
+      const initialScore = player.stats.score;
+
+      // Spawn timeout horde
+      engine.spawnTimeOutHorde(grid, player);
+      expect(engine.getAliveCount()).toBe(10);
+
+      // Door coordinates from grid
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+
+      // While 10 Pontans are alive, attempting door entry does NOT clear stage
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+      const blockedDoorResult = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(blockedDoorResult).toBeNull();
+
+      // Eliminate Pontans with bomb flames
+      // Spawn two Pontans at (6, 1) and (7, 1) on EMPTY ground
+      engine.clearAll();
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+      const p1 = engine.spawnEnemy('PONTAN', 6, 1, grid);
+      const p2 = engine.spawnEnemy('PONTAN', 7, 1, grid);
+      expect(p1).not.toBeNull();
+      expect(p2).not.toBeNull();
+
+      player.stats.flameRange = 3;
+      player.x = 96.0;
+      player.y = 16.0;
+      const bomb = ordinance.placeBomb(6, 1, player, grid);
+      ordinance.detonateBomb(bomb!.id, grid, player);
+
+      const kills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(kills).toHaveLength(2);
+      expect(kills[0].pointsAwarded).toBe(8000); // 1x combo = 8000
+      expect(kills[1].pointsAwarded).toBe(16000); // 2x combo = 16000
+      expect(player.stats.score).toBe(initialScore + 24000);
+
+      // Finish decay
+      engine.update(600, player, grid, ordinance);
+      expect(engine.getAliveCount()).toBe(0);
+
+      // With 0 enemies alive, standing on door succeeds
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+      const clearedDoorResult = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(clearedDoorResult?.type).toBe('STAGE_CLEARED');
+    });
+  });
+
+  describe('Door & Power-Up Trap Spawns (spawnFromTile)', () => {
+    it('with 0 enemies alive, bombing door or powerup generates exactly 8 enemies originating at tile coordinates', () => {
+      const engine = createEnemiesEngine();
+      const doorTx = 14;
+      const doorTy = 5;
+
+      expect(engine.getAliveCount()).toBe(0);
+      const spawned = engine.spawnFromTile(doorTx, doorTy);
+      expect(spawned).toHaveLength(8);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // Verifies exact tile coordinates (x = tx * 16, y = ty * 16)
+      expect(spawned.every((e) => e.x === doorTx * 16.0 && e.y === doorTy * 16.0)).toBe(true);
+
+      // Verifies enemy archetypes (ONEAL, MINVO, PONTAN)
+      const allowedTypes: EnemyType[] = ['ONEAL', 'MINVO', 'PONTAN'];
+      expect(spawned.every((e) => allowedTypes.includes(e.type))).toBe(true);
+      expect(spawned.every((e) => e.state === 'ALIVE')).toBe(true);
+    });
+
+    it('with 5 enemies alive, bombing door or powerup spawns exactly 3 enemies (total 8 in map)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 5 enemies outside safe zone
+      for (let x = 6; x <= 10; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(5);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(3);
+      expect(engine.getAliveCount()).toBe(8);
+    });
+
+    it('with 6 enemies alive, bombing powerup generates only 2 enemies without exceeding limit of 8 (or MAX_ACTIVE_ENEMIES = 10)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 6 enemies
+      for (let x = 6; x <= 11; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(6);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(2);
+      expect(engine.getAliveCount()).toBe(8);
+      expect(engine.getAliveCount()).toBeLessThanOrEqual(MAX_ACTIVE_ENEMIES);
+    });
+
+    it('with 8 or more enemies alive, bombing door or powerup generates 0 new enemies', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 8 enemies
+      for (let x = 6; x <= 13; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(8);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+    });
+
+    it('spawnEnemy() rejects spawning when MAX_ACTIVE_ENEMIES = 10 limit is reached', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 10 enemies
+      for (let x = 6; x <= 15; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(10);
+
+      // 11th spawn must be rejected
+      grid.setTile(16, 1, TileType.EMPTY);
+      const eleventh = engine.spawnEnemy('BALLOM', 16, 1, grid);
+      expect(eleventh).toBeNull();
+      expect(engine.getAliveCount()).toBe(10);
+    });
+
+    it('disperses enemies across available cardinal directions upon spawning', () => {
+      const engine = createEnemiesEngine();
+      const spawned = engine.spawnFromTile(10, 5, 4);
+
+      expect(spawned).toHaveLength(4);
+      const directions = spawned.map((e) => e.direction);
+      // All 4 cardinal directions assigned sequentially
+      expect(directions).toContain('UP');
+      expect(directions).toContain('RIGHT');
+      expect(directions).toContain('DOWN');
+      expect(directions).toContain('LEFT');
+    });
+
+    it('spawns custom count and explicit enemy type when parameters are provided', () => {
+      const engine = createEnemiesEngine();
+      const spawned = engine.spawnFromTile(8, 8, 6, 'MINVO');
+
+      expect(spawned).toHaveLength(6);
+      expect(spawned.every((e) => e.type === 'MINVO')).toBe(true);
+      expect(spawned.every((e) => e.x === 8 * 16.0 && e.y === 8 * 16.0)).toBe(true);
+    });
+
+    it('increases aliveCount when door is bombed, blocking exit until newly spawned enemies are cleared', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+      const powerups = createPowerupEngine();
+
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+
+      // Initially 0 enemies alive
+      expect(engine.getAliveCount()).toBe(0);
+      const canExitInitially = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(canExitInitially?.type).toBe('STAGE_CLEARED');
+
+      // Bombing the revealed door triggers spawnFromTile(doorCoord.x, doorCoord.y)
+      engine.spawnFromTile(doorCoord.x, doorCoord.y, 5, 'ONEAL');
+      expect(engine.getAliveCount()).toBe(5);
+
+      // Exit is now blocked because getAliveCount() > 0
+      const blockedExit = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(blockedExit).toBeNull();
+
+      // Clear the trap enemies
+      engine.clearAll();
+      expect(engine.getAliveCount()).toBe(0);
+
+      // Door exit is unlocked again
+      const unblockedExit = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(unblockedExit?.type).toBe('STAGE_CLEARED');
+    });
+
+    it('spawns enemies from POWERUP_REVEALED exact tile coordinates when powerup is hit', () => {
+      const engine = createEnemiesEngine();
+      const pTx = 7;
+      const pTy = 3;
+
+      const spawned = engine.spawnFromTile(pTx, pTy, 4, 'PONTAN');
+      expect(spawned).toHaveLength(4);
+      expect(spawned.every((e) => e.x === pTx * 16.0 && e.y === pTy * 16.0)).toBe(true);
+      expect(spawned.every((e) => e.type === 'PONTAN')).toBe(true);
+    });
+
+    it('determines canonical trap wave enemy type based on stage (Stage 1: ONEAL .. Stage 10+: PONTAN)', () => {
+      expect(getTrapEnemyTypeForStage(1)).toBe('ONEAL');
+      expect(getTrapEnemyTypeForStage(2)).toBe('DAHL');
+      expect(getTrapEnemyTypeForStage(3)).toBe('MINVO');
+      expect(getTrapEnemyTypeForStage(4)).toBe('KONDORIA');
+      expect(getTrapEnemyTypeForStage(5)).toBe('OVAPE');
+      expect(getTrapEnemyTypeForStage(6)).toBe('OVAPE');
+      expect(getTrapEnemyTypeForStage(7)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(8)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(9)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(10)).toBe('PONTAN');
+      expect(getTrapEnemyTypeForStage(50)).toBe('PONTAN');
+    });
+
+    it('spawnTrapWave() spawns exactly 8 scaled enemies from exact tile coordinates', () => {
+      const engine = createEnemiesEngine();
+
+      // Stage 1 trap: 8 ONEAL
+      const wave1 = engine.spawnTrapWave(1, 10, 5);
+      expect(wave1).toHaveLength(8);
+      expect(wave1.every((e) => e.type === 'ONEAL')).toBe(true);
+      expect(wave1.every((e) => e.x === 10 * 16.0 && e.y === 5 * 16.0)).toBe(true);
+
+      // Stage 3 trap: 8 MINVO (cleared first so slots are free)
+      engine.clearAll();
+      const wave3 = engine.spawnTrapWave(3, 12, 6);
+      expect(wave3).toHaveLength(8);
+      expect(wave3.every((e) => e.type === 'MINVO')).toBe(true);
+
+      // Stage 7 trap: 8 PASS
+      engine.clearAll();
+      const wave7 = engine.spawnTrapWave(7, 8, 4);
+      expect(wave7).toHaveLength(8);
+      expect(wave7.every((e) => e.type === 'PASS')).toBe(true);
+
+      // Stage 10 trap: 8 PONTAN
+      engine.clearAll();
+      const wave10 = engine.spawnTrapWave(10, 15, 7);
+      expect(wave10).toHaveLength(8);
+      expect(wave10.every((e) => e.type === 'PONTAN')).toBe(true);
+    });
+
+    it('grants 520ms spawn immunity so enemies spawned by bombing a door survive the triggering explosion', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const ordinance = createOrdinanceEngine();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+
+      // Place bomb directly on door and detonate
+      const bomb = ordinance.placeBomb(doorCoord.x, doorCoord.y, player, grid);
+      expect(bomb).not.toBeNull();
+      ordinance.detonateBomb(bomb!.id, grid, player);
+
+      // Bomb explosion is now active with flame covering the door tile
+      expect(ordinance.activeExplosions.length).toBe(1);
+
+      // Bombing the door triggers spawnFromTile (or spawnTrapWave)
+      const spawned = engine.spawnFromTile(doorCoord.x, doorCoord.y, 8, 'ONEAL');
+      expect(spawned).toHaveLength(8);
+      expect(spawned.every((e) => e.spawnImmunityMs === 520)).toBe(true);
+
+      // 1. During initial tick (frame 0), flame collisions MUST NOT kill the newly spawned enemies
+      const instantKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(instantKills).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 2. Advance 300ms (within 480ms explosion duration): enemies still immune (spawnImmunityMs = 220)
+      engine.update(300, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(220);
+      const midKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(midKills).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 3. Advance another 180ms (total 480ms): explosion naturally expires, immunity has 40ms left
+      ordinance.update(480, player, grid);
+      engine.update(180, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(40);
+      expect(engine.getAliveCount()).toBe(8);
+
+      // 4. Advance past 520ms: spawnImmunityMs drops to 0
+      engine.update(50, player, grid, ordinance);
+      expect(spawned[0].spawnImmunityMs).toBe(0);
+
+      // 5. Now a subsequent bomb explosion will kill the enemies
+      const bomb2 = ordinance.placeBomb(doorCoord.x, doorCoord.y, player, grid);
+      ordinance.detonateBomb(bomb2!.id, grid, player);
+      const lateKills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(lateKills.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Enemy Death Sequence (DYING State)', () => {
+    it('transitions enemy from ALIVE to DYING and removes it after 600ms', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy?.state).toBe('ALIVE');
+
+      // Create an explosion at (6, 1)
+      player.x = 96.0;
+      player.y = 16.0;
+      const bomb = ordinance.placeBomb(6, 1, player, grid);
+      ordinance.detonateBomb(bomb!.id, grid, player);
+
+      engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(enemy?.state).toBe('DYING');
+
+      // Advance by 300ms: still DYING
+      engine.update(300, player, grid, ordinance);
+      expect(enemy?.state).toBe('DYING');
+      expect(engine.aliveCount).toBe(0);
+      expect(engine.activeEnemies).toHaveLength(1);
+
+      // Advance by remaining 300ms: transitions to DEAD and is removed
+      engine.update(300, player, grid, ordinance);
+      expect(engine.activeEnemies).toHaveLength(0);
+    });
+  });
+
+  describe('Lethality Against Bomberman (8x8 Core Hurtbox)', () => {
+    it('triggers player.kill() when 8x8 centered hurtboxes intersect (|dx| < 8 && |dy| < 8)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Complete player spawning invulnerability
+      player.update(500, null, grid);
+      expect(player.state).toBe('ALIVE');
+      expect(player.isInvulnerable).toBe(false);
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      // Position enemy right on top of player at (16.0, 16.0)
+      enemy.x = 16.0;
+      enemy.y = 16.0;
+
+      const killed = engine.checkPlayerLethality(player);
+      expect(killed).toBe(true);
+      expect(player.state).toBe('DYING');
+    });
+
+    it('spares player when distance is >= 8px even if 16x16 bounding boxes touch or overlap transparent edges', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, null, grid);
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Player at (16.0, 16.0). Enemy at (24.0, 16.0) -> |dx| = 8.0 >= 8
+      // Outer 16x16 boxes overlap by 8px, but 8x8 core hurtboxes do NOT touch!
+      player.x = 16.0;
+      player.y = 16.0;
+      enemy.x = 24.0;
+      enemy.y = 16.0;
+
+      const killedAt8 = engine.checkPlayerLethality(player);
+      expect(killedAt8).toBe(false);
+      expect(player.state).toBe('ALIVE');
+
+      // Move 1px closer to (23.0, 16.0) -> |dx| = 7.0 < 8 -> Kills player!
+      enemy.x = 23.0;
+      const killedAt7 = engine.checkPlayerLethality(player);
+      expect(killedAt7).toBe(true);
+      expect(player.state).toBe('DYING');
+    });
+
+    it('ignores collision when player has active MYSTERY invulnerability (invincibleTimerMs > 0)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      player.update(500, null, grid);
+      player.stats.invincibleTimerMs = 30000;
+      expect(player.isInvulnerable).toBe(true);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      enemy.x = 16.0;
+      enemy.y = 16.0;
+
+      const killed = engine.checkPlayerLethality(player);
+      expect(killed).toBe(false);
+      expect(player.state).toBe('ALIVE');
+    });
+
+    it('ignores collision when enemy is DYING', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      player.update(500, null, grid);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      enemy.state = 'DYING';
+      enemy.x = 16.0;
+      enemy.y = 16.0;
+
+      const killed = engine.checkPlayerLethality(player);
+      expect(killed).toBe(false);
+      expect(player.state).toBe('ALIVE');
+    });
+  });
+
+  describe('Immediate Bomb Rebound & Enclosure Mechanics', () => {
+    it('immediately halts and reverses direction 180 degrees when moving towards an active bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(1, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      enemy.x = 16.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Drop bomb at tile (2, 1) directly in front of enemy
+      ordinance.placeBomb(2, 1, player, grid);
+
+      engine.update(16.666, player, grid, ordinance);
+
+      // Enemy must stop at edge of tile 1 (16.0) and face LEFT
+      expect(enemy.x).toBe(16.0);
+      expect(enemy.direction).toBe('LEFT');
+    });
+
+    it('reverses mid-tile without penetrating into the bomb tile when a bomb is planted', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(1, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Enemy has started crossing from tile 1 to tile 2 (x = 20.0) moving RIGHT
+      enemy.x = 20.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      ordinance.placeBomb(2, 1, player, grid);
+
+      engine.update(16.666, player, grid, ordinance);
+
+      // Must snap back to border of tile 1 (16.0) and reverse to LEFT
+      expect(enemy.x).toBe(16.0);
+      expect(enemy.direction).toBe('LEFT');
+    });
+
+    it('supports trapping enemies between two bombs or between a wall and a bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(2, 1, TileType.EMPTY);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(4, 1, TileType.EMPTY);
+      player.stats.maxBombs = 5;
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) -> (48.0, 16.0)
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Bomb on the right (4, 1) and bomb on the left (2, 1)
+      const bRight = ordinance.placeBomb(4, 1, player, grid);
+      const bLeft = ordinance.placeBomb(2, 1, player, grid);
+      expect(bRight).not.toBeNull();
+      expect(bLeft).not.toBeNull();
+
+      // Tick 1: moving RIGHT towards bomb at (4, 1) -> rebounds to edge (48.0) and flips to LEFT
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.direction).toBe('LEFT');
+
+      // Tick 2: moving LEFT towards bomb at (2, 1) -> rebounds to edge (48.0) and flips to RIGHT
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.direction).toBe('RIGHT');
+
+      // Trapped: never penetrates either bomb tile
+      expect(enemy.x).toBe(48.0);
+    });
+
+    it('never phases through a SOFT_BLOCK when trapped by a newly planted bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      player.stats.maxBombs = 5;
+
+      // Configure layout:
+      // (2, 1): SOFT_BLOCK
+      // (3, 1): EMPTY
+      // (3, 0): HARD_WALL (border)
+      // (3, 2): HARD_WALL (pillar)
+      // (4, 1): Active bomb
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+      grid.setTile(4, 1, TileType.EMPTY);
+      grid.setTile(6, 1, TileType.EMPTY);
+
+      const bomb = ordinance.placeBomb(4, 1, player, grid);
+      expect(bomb).not.toBeNull();
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) -> (48.0, 16.0) moving RIGHT towards the bomb at (4, 1)
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Run 60 ticks of engine.update
+      for (let tick = 0; tick < 60; tick++) {
+        engine.update(16.666, player, grid, ordinance);
+
+        // Strict assertions on every tick: enemy.x is NEVER < 48 and NEVER > 48
+        expect(enemy.x).not.toBeLessThan(48.0);
+        expect(enemy.x).not.toBeGreaterThan(48.0);
+        expect(enemy.x).toBe(48.0);
+        expect(enemy.y).toBe(16.0);
+      }
+    });
+
+    it('never phases through a SOFT_BLOCK when trapped by a newly planted bomb mid-tile (x = 52)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      player.stats.maxBombs = 5;
+
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+      grid.setTile(4, 1, TileType.EMPTY);
+      grid.setTile(6, 1, TileType.EMPTY);
+
+      const bomb = ordinance.placeBomb(4, 1, player, grid);
+      expect(bomb).not.toBeNull();
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) mid-tile (52.0, 16.0) moving RIGHT towards bomb at (4, 1)
+      enemy.x = 52.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      for (let tick = 0; tick < 60; tick++) {
+        engine.update(16.666, player, grid, ordinance);
+
+        // From tick 1 onward, enemy snaps to 48.0 and never phases through
+        expect(enemy.x).not.toBeLessThan(48.0);
+        expect(enemy.x).not.toBeGreaterThan(48.0);
+        expect(enemy.x).toBe(48.0);
+        expect(enemy.y).toBe(16.0);
+      }
+    });
+
+    it('Law 1: chooseNextDirection clamps position and enters Trapped State when validDirs.length === 0', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(4, 1, TileType.HARD_WALL);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'LEFT';
+
+      engine.chooseNextDirection(enemy, player.centerTile, grid, ordinance);
+
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.y).toBe(16.0);
+      expect(enemy.lastDecisionTx).toBe(-1);
+      expect(enemy.lastDecisionTy).toBe(-1);
+    });
+  });
+
+  describe('Corridor Sweeping AI (Inercia de Carril) & Canonical NES Behaviors', () => {
+    it('initializes spawn direction with balanced 50/50 horizontal vs vertical axis choice', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Clear a 3x3 cross at (6, 5) so UP, DOWN, LEFT, RIGHT are all open
+      grid.setTile(6, 5, TileType.EMPTY);
+      grid.setTile(5, 5, TileType.EMPTY);
+      grid.setTile(7, 5, TileType.EMPTY);
+      grid.setTile(6, 4, TileType.EMPTY);
+      grid.setTile(6, 6, TileType.EMPTY);
+
+      // RNG < 0.5 -> Horizontal axis (LEFT or RIGHT)
+      const hDir = engine.chooseInitialDirection(6, 5, false, grid, () => 0.2);
+      expect(['LEFT', 'RIGHT']).toContain(hDir);
+
+      // RNG >= 0.5 -> Vertical axis (UP or DOWN)
+      const vDir = engine.chooseInitialDirection(6, 5, false, grid, () => 0.8);
+      expect(['UP', 'DOWN']).toContain(vDir);
+    });
+
+    it('Invariant 1: BALLOM in long open corridor NEVER reverses mid-corridor while tilesWalkedInCurrentDir < 3', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 240.0;
+      player.y = 240.0;
+
+      // Create an open corridor from tx=5 to tx=12 along ty=1 (outside safe zone Manhattan >= 5)
+      for (let x = 5; x <= 12; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        grid.setTile(x, 0, TileType.HARD_WALL);
+        grid.setTile(x, 2, TileType.HARD_WALL);
+      }
+
+      const ballom = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(ballom).not.toBeNull();
+      if (!ballom) return;
+
+      ballom.direction = 'RIGHT';
+      ballom.x = 96.0; // tile (6, 1)
+      ballom.y = 16.0;
+      ballom.tilesWalkedInCurrentDir = 0;
+
+      // Mock RNG that would try to reverse if allowed (returns 0.0)
+      const mockRng = () => 0.0;
+
+      // Step 1: At tile 6, forward is open, tilesWalked is 0 (< 3)
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Step 2: At tile 7, tilesWalked is 1 (< 3)
+      ballom.x = 112.0;
+      ballom.tilesWalkedInCurrentDir = 1;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Step 3: At tile 8, tilesWalked is 2 (< 3)
+      ballom.x = 128.0;
+      ballom.tilesWalkedInCurrentDir = 2;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Even at a 4-way cross when tilesWalked < 3, BALLOM does NOT turn (100% straight)
+      grid.setTile(8, 0, TileType.EMPTY);
+      grid.setTile(8, 2, TileType.EMPTY);
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, mockRng);
+      expect(ballom.direction).toBe('RIGHT');
+
+      // Only when tilesWalked >= 3 at a cross with open perpendiculars:
+      // With rng < 0.20, it turns perpendicular
+      ballom.tilesWalkedInCurrentDir = 3;
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.1);
+      expect(['UP', 'DOWN']).toContain(ballom.direction);
+    });
+
+    it('BALLOM at obstacle fin-de-pasillo splits 50% perpendicular and 50% reverse', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Tile (6, 1): facing RIGHT towards HARD_WALL at (7, 1)
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.HARD_WALL); // Forward blocked
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.EMPTY); // DOWN is open
+      grid.setTile(5, 1, TileType.EMPTY); // Reverse (LEFT) is open
+
+      const ballom = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(ballom).not.toBeNull();
+      if (!ballom) return;
+
+      ballom.direction = 'RIGHT';
+      ballom.x = 96.0;
+      ballom.y = 16.0;
+
+      // RNG < 0.5 -> chooses perpendicular (DOWN)
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.25);
+      expect(ballom.direction).toBe('DOWN');
+
+      // Reset to RIGHT: RNG >= 0.5 -> chooses reverse (LEFT)
+      ballom.direction = 'RIGHT';
+      engine.evaluateDecisionAtTile(ballom, player.centerTile, grid, undefined, () => 0.75);
+      expect(ballom.direction).toBe('LEFT');
+    });
+
+    it('Invariant 2: ONEAL can reverse 180 degrees mid-corridor when tilesWalkedInCurrentDir >= reversalQuota without touching wall', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 240.0;
+      player.y = 240.0; // Far away (distance > 7)
+
+      // Straight corridor from tx=5 to tx=12
+      for (let x = 5; x <= 12; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        grid.setTile(x, 0, TileType.HARD_WALL);
+        grid.setTile(x, 2, TileType.HARD_WALL);
+      }
+
+      const oneal = engine.spawnEnemy('ONEAL', 6, 1, grid);
+      expect(oneal).not.toBeNull();
+      if (!oneal) return;
+
+      oneal.direction = 'RIGHT';
+      oneal.x = 96.0;
+      oneal.y = 16.0;
+      oneal.reversalQuota = 2;
+      oneal.tilesWalkedInCurrentDir = 1; // < reversalQuota
+
+      // RNG < 0.45, but quota not met -> keeps forward
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined, () => 0.1);
+      expect(oneal.direction).toBe('RIGHT');
+
+      // Advance to 2nd tile: quota met (tilesWalkedInCurrentDir = 2 >= 2)
+      oneal.tilesWalkedInCurrentDir = 2;
+      oneal.x = 112.0;
+
+      // RNG < 0.45 -> triggers 180° mid-corridor reversal to LEFT!
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined, () => 0.1);
+      expect(oneal.direction).toBe('LEFT');
+      expect(oneal.tilesWalkedInCurrentDir).toBe(0);
+    });
+
+    it('ONEAL detects unblocked Line of Sight within 8 tiles, accelerates to burst speed 0.65, and faces player', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Clear row 1 from col 2 to 8
+      for (let x = 2; x <= 8; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      player.x = 128.0; // tile (8, 1)
+      player.y = 16.0;
+
+      const oneal = engine.spawnEnemy('ONEAL', 2, 1, grid);
+      if (!oneal) return;
+
+      oneal.direction = 'UP'; // Facing away
+      oneal.x = 32.0;
+      oneal.y = 16.0;
+
+      // Check LOS
+      const los = engine.hasLineOfSight(2, 1, 8, 1, oneal, grid);
+      expect(los).toBe(true);
+
+      // Evaluate at intersection
+      engine.evaluateDecisionAtTile(oneal, player.centerTile, grid, undefined);
+      expect(oneal.speed).toBe(0.65);
+      expect(oneal.direction).toBe('RIGHT'); // Turns towards player
+
+      // Obstructing tile with SOFT_BLOCK breaks line of sight for ONEAL
+      grid.setTile(5, 1, TileType.SOFT_BLOCK);
+      const losBlocked = engine.hasLineOfSight(2, 1, 8, 1, oneal, grid);
+      expect(losBlocked).toBe(false);
+    });
+
+    it('Invariant 3: Wallpass capability strictly differentiates ghost enemies (KONDORIA, OVAPE, PONTAN) from solid enemies', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      grid.setTile(5, 5, TileType.SOFT_BLOCK);
+
+      // Solid enemies cannot pass soft blocks
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: false }, grid)).toBe(false);
+
+      // Ghost enemies can pass soft blocks
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: true }, grid)).toBe(true);
+
+      // HARD_WALL is blocked for ALL enemies
+      grid.setTile(5, 5, TileType.HARD_WALL);
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: false }, grid)).toBe(false);
+      expect(engine.canEnemyPassTile(5, 5, { hasWallpass: true }, grid)).toBe(false);
+    });
+
+    it('DAHL prefers perpendicular turns (70% probability) when reaching quota or obstacle', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY); // forward open
+      grid.setTile(6, 0, TileType.HARD_WALL);
+      grid.setTile(6, 2, TileType.EMPTY); // DOWN perpendicular open
+      grid.setTile(5, 1, TileType.EMPTY); // reverse open
+
+      const dahl = engine.spawnEnemy('DAHL', 6, 1, grid);
+      if (!dahl) return;
+
+      dahl.direction = 'RIGHT';
+      dahl.x = 96.0;
+      dahl.y = 16.0;
+      dahl.reversalQuota = 2;
+      dahl.tilesWalkedInCurrentDir = 2;
+
+      // Roll < 0.70 -> turns to perpendicular (DOWN)
+      engine.evaluateDecisionAtTile(dahl, player.centerTile, grid, undefined, () => 0.5);
+      expect(dahl.direction).toBe('DOWN');
+    });
+
+    it('MINVO reverses when walking away from player for >= 2 tiles (75% probability)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player is at (2, 1) -> left of Minvo
+      player.x = 32.0;
+      player.y = 16.0;
+
+      // Corridor from 2 to 7
+      for (let x = 2; x <= 7; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      const minvo = engine.spawnEnemy('MINVO', 5, 1, grid);
+      if (!minvo) return;
+
+      // Minvo is moving RIGHT (away from player who is at tile 2)
+      minvo.direction = 'RIGHT';
+      minvo.x = 80.0;
+      minvo.y = 16.0;
+      minvo.tilesWalkedInCurrentDir = 2;
+
+      // Roll < 0.75 -> reverses towards player (LEFT)
+      engine.evaluateDecisionAtTile(minvo, player.centerTile, grid, undefined, () => 0.5);
+      expect(minvo.direction).toBe('LEFT');
+    });
+
+    it('KONDORIA relentlessly pathfinds minimizing Manhattan distance through soft blocks (85% probability)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player at (5, 5). Kondoria at (3, 3) (odd intersection)
+      player.x = 80.0;
+      player.y = 80.0;
+
+      // Fill tile (4, 3) with SOFT_BLOCK
+      grid.setTile(4, 3, TileType.SOFT_BLOCK);
+      grid.setTile(3, 4, TileType.EMPTY);
+
+      const kondoria = engine.spawnEnemy('KONDORIA', 3, 3, grid);
+      if (!kondoria) return;
+
+      kondoria.direction = 'UP'; // was moving UP (away)
+      kondoria.x = 48.0;
+      kondoria.y = 48.0;
+
+      // Kondoria has wallpass, can pass through SOFT_BLOCK at (4, 3) (RIGHT) or (3, 4) (DOWN)
+      // Both reduce Manhattan distance from 4 to 3.
+      // With rng < 0.85, Kondoria picks a direction minimizing distance to player
+      engine.evaluateDecisionAtTile(kondoria, player.centerTile, grid, undefined, () => 0.1);
+      expect(['RIGHT', 'DOWN']).toContain(kondoria.direction);
+    });
+
+    it('PASS & PONTAN immediately reverse 180 degrees (90% probability) when player is detected behind them', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Player is at tile (2, 1)
+      player.x = 32.0;
+      player.y = 16.0;
+
+      for (let x = 1; x <= 7; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+      }
+
+      const pass = engine.spawnEnemy('PASS', 5, 1, grid);
+      if (!pass) return;
+
+      // PASS moving RIGHT with player at tile 2 behind it
+      pass.direction = 'RIGHT';
+      pass.x = 80.0;
+      pass.y = 16.0;
+
+      // Roll < 0.90 -> immediate 180° turnaround to LEFT
+      engine.evaluateDecisionAtTile(pass, player.centerTile, grid, undefined, () => 0.1);
+      expect(pass.direction).toBe('LEFT');
+    });
   });
 });

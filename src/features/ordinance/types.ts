@@ -1,5 +1,5 @@
 import type { IBombermanEntity } from '../bomberman/types';
-import type { IStageGridEngine } from '../stage-grid/types';
+import type { IStageGridEngine, TileType } from '../stage-grid/types';
 
 /**
  * Core Ordinance Constants for NES Bomberman (1985)
@@ -95,6 +95,11 @@ export interface IOrdinanceEngine {
   detonateOldestBomb(grid: IStageGridEngine, player?: IBombermanEntity): void;
 
   /**
+   * Detonates a specific bomb by ID and processes chain reactions iteratively using FIFO queue.
+   */
+  detonateBomb(bombId: number, grid: IStageGridEngine, player?: IBombermanEntity): void;
+
+  /**
    * Advances fuse timers, updates walk-off grace status, advances explosion frames,
    * triggers chain reactions, and evaluates flame lethality against player.
    */
@@ -125,7 +130,26 @@ export interface IOrdinanceEngine {
   ): boolean;
 
   /**
+   * Consumes and returns any pending punishment wave spawns triggered by flame impacts on door or powerup.
+   */
+  consumePendingPunishmentWaves(): number;
+
+  /**
+   * Consumes and returns any pending punishment tile spawns triggered by flame impacts on DOOR_REVEALED or POWERUP_REVEALED.
+   */
+  consumePendingTileSpawns(): readonly PendingTileSpawn[];
+
+  /**
    * Resets all bombs and explosions to empty state.
    */
   clear(): void;
+}
+
+/**
+ * Tile coordinates and type where enemies should spawn upon flame impact.
+ */
+export interface PendingTileSpawn {
+  readonly tx: number;
+  readonly ty: number;
+  readonly tileType: TileType;
 }

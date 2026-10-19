@@ -3,15 +3,16 @@ import type { Explosion, IOrdinanceEngine } from '../ordinance/types';
 import type { IStageGridEngine } from '../stage-grid/types';
 
 /**
- * The 7 Canonical Enemy Types in NES Bomberman (1985).
+ * The 8 Canonical Enemy Types in NES Bomberman (1985).
  */
 export type EnemyType =
   | 'BALLOM'
   | 'ONEAL'
   | 'DAHL'
   | 'MINVO'
-  | 'OVAPE'
   | 'KONDORIA'
+  | 'OVAPE'
+  | 'PASS'
   | 'PONTAN';
 
 /**
@@ -30,6 +31,8 @@ export type EnemyDirection = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 export const ENEMY_SIZE = 16;
 export const ENEMY_DEATH_DURATION_MS = 600;
 export const SPAWN_EXCLUSION_MANHATTAN_DISTANCE = 5;
+export const STAGE_SPAWN_INITIAL_MIN_DISTANCE = 8;
+export const MAX_ACTIVE_ENEMIES = 10;
 
 /**
  * Official NES Bomberman Base Scores per Enemy
@@ -39,23 +42,27 @@ export const ENEMY_BASE_SCORES: Readonly<Record<EnemyType, number>> = {
   ONEAL: 200,
   DAHL: 400,
   MINVO: 800,
-  OVAPE: 1000,
-  KONDORIA: 2000,
-  PONTAN: 4000,
+  KONDORIA: 1000,
+  OVAPE: 2000,
+  PASS: 4000,
+  PONTAN: 8000,
 };
 
 /**
  * Official Speeds (pixels per tick at 60Hz)
  */
 export const ENEMY_BASE_SPEEDS: Readonly<Record<EnemyType, number>> = {
-  BALLOM: 0.5,
-  ONEAL: 0.75,
-  DAHL: 0.75,
-  MINVO: 1.0,
-  OVAPE: 0.5,
   KONDORIA: 0.25,
-  PONTAN: 1.5,
+  BALLOM: 0.375,
+  OVAPE: 0.375,
+  ONEAL: 0.5,
+  DAHL: 0.625,
+  MINVO: 0.75,
+  PASS: 1.0,
+  PONTAN: 1.125,
 };
+
+export const ONEAL_BURST_SPEED = 0.65;
 
 /**
  * Wallpass ability (can walk through destructible soft blocks)
@@ -65,8 +72,9 @@ export const ENEMY_WALLPASS_CAPABILITIES: Readonly<Record<EnemyType, boolean>> =
   ONEAL: false,
   DAHL: false,
   MINVO: false,
-  OVAPE: true,
   KONDORIA: true,
+  OVAPE: true,
+  PASS: false,
   PONTAN: true,
 };
 
@@ -96,6 +104,11 @@ export interface EnemyEntity {
   readonly baseScore: number;
   deathTimerMs: number;
   scoreAwarded?: number;
+  spawnImmunityMs: number;
+  tilesWalkedInCurrentDir: number;
+  reversalQuota: number;
+  lastDecisionTx?: number;
+  lastDecisionTy?: number;
 }
 
 /**
@@ -114,6 +127,11 @@ export interface EnemySnapshot {
   readonly hasWallpass: boolean;
   readonly deathTimerMs: number;
   readonly scoreAwarded?: number;
+  readonly spawnImmunityMs: number;
+  readonly tilesWalkedInCurrentDir: number;
+  readonly reversalQuota: number;
+  readonly lastDecisionTx?: number;
+  readonly lastDecisionTy?: number;
 }
 
 /**
@@ -131,6 +149,11 @@ export interface IEnemiesEngine {
   readonly aliveCount: number;
 
   /**
+   * Returns the count of living enemies remaining on the stage.
+   */
+  getAliveCount(): number;
+
+  /**
    * Spawns a single enemy on a qualified tile outside the safe spawn zone.
    * Returns null if tile is within exclusion zone or obstructed.
    */
@@ -138,8 +161,88 @@ export interface IEnemiesEngine {
     type: EnemyType,
     tx: number,
     ty: number,
-    grid: IStageGridEngine
+    grid: IStageGridEngine,
+    rng?: () => number
   ): EnemyEntity | null;
+
+  /**
+   * Generates a random reversal quota for the enemy archetype.
+   */
+  getRandomReversalQuota(type: EnemyType, rng?: () => number): number;
+
+  /**
+   * Selects an initial movement direction with 50/50 balance between horizontal and vertical axes.
+   */
+  chooseInitialDirection(
+    tx: number,
+    ty: number,
+    hasWallpass: boolean,
+    grid: IStageGridEngine,
+    rng?: () => number
+  ): EnemyDirection;
+
+  /**
+   * Evaluates and updates an enemy's direction at a tile intersection according to NES 1985 rules.
+   */
+  evaluateDecisionAtTile(
+    enemy: EnemyEntity,
+    playerTile: { x: number; y: number },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine,
+    rng?: () => number
+  ): void;
+
+  /**
+   * Evaluates available cardinal directions and updates enemy direction.
+   * If all directions are impassable (validDirs.length === 0), enters Trapped State.
+   */
+  chooseNextDirection(
+    enemy: EnemyEntity,
+    playerTile: { x: number; y: number },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine,
+    rng?: () => number
+  ): void;
+
+  /**
+   * Checks unblocked straight line of sight between an enemy and a target tile within 8 tiles.
+   */
+  hasLineOfSight(
+    tx: number,
+    ty: number,
+    targetTx: number,
+    targetTy: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
+
+  /**
+   * Checks whether a tile is passable for an enemy entity.
+   */
+  canEnemyPassTile(
+    tx: number,
+    ty: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
+
+  /**
+   * Checks whether a tile is passable for an enemy entity (alias for canEnemyPassTile).
+   */
+  canEnemyEnterTile(
+    tx: number,
+    ty: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
+
+  /**
+   * Returns the authentic enemy distribution roster for a stage.
+   */
+  getStageEnemyRoster(stage: number): readonly EnemyType[];
 
   /**
    * Spawns the authentic stage enemy distribution for the specified stage number.
@@ -147,6 +250,50 @@ export interface IEnemiesEngine {
   spawnStageEnemies(
     stage: number,
     grid: IStageGridEngine,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns the authentic NES penalty wave of 8 PONTAN enemies.
+   */
+  spawnPunishmentWave(
+    grid: IStageGridEngine,
+    player: IBombermanEntity,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns a horde of PONTAN enemies filling available memory slots up to MAX_ACTIVE_ENEMIES (10)
+   * when TIME reaches 0:00, appearing at valid tiles with Manhattan distance >= 5 from Bomberman's position.
+   */
+  spawnTimeOutHorde(
+    grid: IStageGridEngine,
+    playerPos: { x: number; y: number } | IBombermanEntity,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns a group of enemies (scaled by stage) from the exact coordinates of a tile
+   * (e.g. when an active flame strikes DOOR_REVEALED or POWERUP_REVEALED),
+   * limited by current living enemies and capped so total alive count does not exceed 8.
+   */
+  spawnFromTile(
+    doorTx: number,
+    doorTy: number,
+    count?: number,
+    type?: EnemyType,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns the authentic NES penalty trap of 8 enemies corresponding to the stage difficulty:
+   * Stage 1: 8 ONEAL, Stage 2: 8 DAHL, Stage 3: 8 MINVO, Stage 4: 8 KONDORIA,
+   * Stage 5-6: 8 OVAPE, Stage 7-9: 8 PASS, Stage 10+: 8 PONTAN.
+   */
+  spawnTrapWave(
+    stage: number,
+    tx: number,
+    ty: number,
     rng?: () => number
   ): readonly EnemyEntity[];
 
