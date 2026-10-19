@@ -71,6 +71,9 @@ export class EnemiesRenderer {
       case 'KONDORIA':
         this.drawKondoria(x, y);
         break;
+      case 'PASS':
+        this.drawPass(x, y);
+        break;
       case 'PONTAN':
         this.drawPontan(x, y);
         break;
@@ -253,6 +256,45 @@ export class EnemiesRenderer {
     ctx.fillRect(x + 5, y + 6, 2, 2);
     ctx.fillRect(x + 9, y + 6, 2, 2);
     ctx.fillRect(x + 6, y + 9, 4, 1);
+  }
+
+  /**
+   * PASS: Fast orange/yellow aggressive lion face
+   */
+  private drawPass(x: number, y: number): void {
+    const ctx = this.ctx;
+
+    // Mane (orange lion mane)
+    ctx.fillStyle = '#f83800';
+    ctx.fillRect(x + 2, y + 2, 12, 12);
+    ctx.fillRect(x + 1, y + 4, 14, 8);
+
+    // Ear tufts
+    ctx.fillStyle = '#fcb088';
+    ctx.fillRect(x + 2, y + 1, 3, 2);
+    ctx.fillRect(x + 11, y + 1, 3, 2);
+
+    // Inner face (bright yellow)
+    ctx.fillStyle = '#f8b800';
+    ctx.fillRect(x + 4, y + 4, 8, 8);
+    ctx.fillRect(x + 3, y + 6, 10, 4);
+
+    // Eyes (white with black pupils)
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(x + 4, y + 6, 3, 2);
+    ctx.fillRect(x + 9, y + 6, 3, 2);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(x + 5, y + 6, 2, 2);
+    ctx.fillRect(x + 9, y + 6, 2, 2);
+
+    // Snout / Nose / Whiskers
+    ctx.fillStyle = '#fcb088';
+    ctx.fillRect(x + 6, y + 8, 4, 3);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(x + 7, y + 8, 2, 1); // nose
+    ctx.fillRect(x + 6, y + 10, 4, 1); // mouth/teeth
+    ctx.fillRect(x + 2, y + 9, 2, 1); // left whisker
+    ctx.fillRect(x + 12, y + 9, 2, 1); // right whisker
   }
 
   /**

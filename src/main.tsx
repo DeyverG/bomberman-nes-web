@@ -312,7 +312,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       // Check if bomb flames struck DOOR_REVEALED or POWERUP_REVEALED (tile punishment spawn)
       const pendingTileSpawns = ordinanceEngine.consumePendingTileSpawns();
       for (const spawn of pendingTileSpawns) {
-        enemiesEngine.spawnFromTile(spawn.tx, spawn.ty);
+        enemiesEngine.spawnTrapWave(currentStage, spawn.tx, spawn.ty);
       }
       if (pendingTileSpawns.length === 0 && ordinanceEngine.consumePendingPunishmentWaves() > 0) {
         enemiesEngine.spawnPunishmentWave(stageGrid, player);
@@ -378,6 +378,16 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
         isGameActive = false;
         audioEngine.playStageClear();
 
+        // Authentic NES Bomberman: +1 Life upon clearing each stage
+        player.stats.lives += 1;
+
+        // Stage 50 completion: Trigger Victory screen
+        if (currentStage >= 50) {
+          emitHudUpdate({ score: player.stats.score, lives: player.stats.lives });
+          emitSessionState({ state: 'VICTORY' });
+          return;
+        }
+
         currentStage = powerupEngine.advanceStage();
 
         // Save persistent progression to localStorage for CONTINUE
@@ -415,6 +425,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
 
         emitHudUpdate({
           score: player.stats.score,
+          lives: player.stats.lives,
           time: stageTimeRemaining,
         });
         return;

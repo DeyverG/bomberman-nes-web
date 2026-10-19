@@ -182,7 +182,7 @@ export const HudShell: React.FC<HudShellProps> = ({
           }
           e.preventDefault();
         }
-      } else if (sessionState === 'GAME_OVER') {
+      } else if (sessionState === 'GAME_OVER' || sessionState === 'VICTORY') {
         if (e.code === 'Enter' || e.code === 'Space') {
           setSessionState('TITLE_SCREEN');
           emitGameAction('RESTART_TO_TITLE');
@@ -392,6 +392,21 @@ export const HudShell: React.FC<HudShellProps> = ({
               </span>
               <span className="text-[10px] sm:text-xs text-neutral-400 tracking-wider">
                 PRESS ENTER TO CONTINUE
+              </span>
+            </div>
+          )}
+
+          {/* OVERLAY 4: VICTORY (Stage 50 Clear - NES Ending) */}
+          {sessionState === 'VICTORY' && (
+            <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black font-[family-name:var(--font-nes)] text-white p-4 text-center">
+              <span className="text-sm sm:text-base md:text-lg font-bold tracking-widest text-[#f8b800] mb-3 drop-shadow-[2px_2px_0px_#7c0800] animate-pulse">
+                CONGRATULATIONS
+              </span>
+              <span className="text-[10px] sm:text-xs text-[#00a800] tracking-widest mb-4">
+                YOU HAVE COMPLETED BOMBERMAN
+              </span>
+              <span className="text-[9px] sm:text-[10px] text-neutral-400 tracking-wider">
+                PRESS ENTER TO RETURN TO TITLE
               </span>
             </div>
           )}

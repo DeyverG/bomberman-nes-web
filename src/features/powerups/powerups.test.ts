@@ -138,17 +138,24 @@ describe('Power-Up System & Stage Exit Door (Specification Contract)', () => {
       expect(engine.getPowerupForStage(8)).toBe('DETONATOR');
     });
 
-    it('guarantees Stage 9 provides BOMB_UP', () => {
-      expect(engine.getPowerupForStage(9)).toBe('BOMB_UP');
+    it('guarantees Stage 9 provides BOMBPASS', () => {
+      expect(engine.getPowerupForStage(9)).toBe('BOMBPASS');
     });
 
     it('guarantees Stage 10 provides WALLPASS', () => {
       expect(engine.getPowerupForStage(10)).toBe('WALLPASS');
     });
 
-    it('provides cyclic deterministic power-ups for stages > 10', () => {
-      expect(typeof engine.getPowerupForStage(11)).toBe('string');
-      expect(typeof engine.getPowerupForStage(50)).toBe('string');
+    it('provides authentic canonical power-ups for stages up to 50', () => {
+      expect(engine.getPowerupForStage(14)).toBe('BOMB_UP');
+      expect(engine.getPowerupForStage(16)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(18)).toBe('BOMBPASS');
+      expect(engine.getPowerupForStage(20)).toBe('WALLPASS');
+      expect(engine.getPowerupForStage(26)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(30)).toBe('FLAMEPASS');
+      expect(engine.getPowerupForStage(36)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(46)).toBe('MYSTERY');
+      expect(engine.getPowerupForStage(50)).toBe('MYSTERY');
     });
   });
 

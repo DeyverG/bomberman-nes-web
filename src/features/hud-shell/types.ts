@@ -1,4 +1,4 @@
-export type SessionState = 'TITLE_SCREEN' | 'STAGE_INTRO' | 'PLAYING' | 'GAME_OVER';
+export type SessionState = 'TITLE_SCREEN' | 'STAGE_INTRO' | 'PLAYING' | 'GAME_OVER' | 'VICTORY';
 
 export interface HudState {
   time: number;

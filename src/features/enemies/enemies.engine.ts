@@ -14,23 +14,80 @@ import {
   IEnemiesEngine,
   ONEAL_BURST_SPEED,
   SPAWN_EXCLUSION_MANHATTAN_DISTANCE,
+  STAGE_SPAWN_INITIAL_MIN_DISTANCE,
 } from './types';
 
 /**
- * Authentic NES Bomberman (1985) Stage Enemy Rosters
+ * Authentic NES Bomberman (1985) Stage Enemy Rosters (Stages 1 to 50)
  */
 export const STAGE_ENEMY_ROSTERS: Readonly<Record<number, readonly EnemyType[]>> = {
   1: ['BALLOM', 'BALLOM', 'BALLOM', 'BALLOM', 'BALLOM', 'BALLOM'],
   2: ['BALLOM', 'BALLOM', 'BALLOM', 'ONEAL', 'ONEAL', 'ONEAL'],
   3: ['BALLOM', 'BALLOM', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL'],
   4: ['BALLOM', 'ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO'],
-  5: ['BALLOM', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL', 'MINVO', 'OVAPE'],
-  6: ['BALLOM', 'ONEAL', 'DAHL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'OVAPE'],
-  7: ['ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'KONDORIA'],
-  8: ['ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA'],
-  9: ['ONEAL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'MINVO', 'OVAPE', 'KONDORIA'],
-  10: ['ONEAL', 'DAHL', 'MINVO', 'OVAPE', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'PONTAN'],
+  5: ['ONEAL', 'ONEAL', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL'],
+  6: ['ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'KONDORIA'],
+  7: ['ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL', 'KONDORIA', 'KONDORIA'],
+  8: ['ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'MINVO'],
+  9: ['ONEAL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA'],
+  10: ['ONEAL', 'DAHL', 'MINVO', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'OVAPE'],
+  11: ['ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'OVAPE'],
+  12: ['ONEAL', 'DAHL', 'MINVO', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'OVAPE'],
+  13: ['DAHL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'KONDORIA'],
+  14: ['OVAPE', 'OVAPE', 'OVAPE', 'OVAPE', 'OVAPE', 'OVAPE', 'OVAPE', 'PASS'],
+  15: ['DAHL', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'PASS'],
+  16: ['MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'PASS'],
+  17: ['DAHL', 'DAHL', 'DAHL', 'DAHL', 'DAHL', 'KONDORIA', 'KONDORIA', 'PASS'],
+  18: ['BALLOM', 'BALLOM', 'BALLOM', 'ONEAL', 'ONEAL', 'ONEAL', 'PASS', 'PASS'],
+  19: ['BALLOM', 'ONEAL', 'DAHL', 'DAHL', 'DAHL', 'OVAPE', 'PASS', 'PASS'],
+  20: ['ONEAL', 'DAHL', 'MINVO', 'OVAPE', 'KONDORIA', 'KONDORIA', 'PASS', 'PASS'],
+  21: ['OVAPE', 'OVAPE', 'OVAPE', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'PASS', 'PASS'],
+  22: ['DAHL', 'DAHL', 'DAHL', 'DAHL', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'PASS'],
+  23: ['DAHL', 'DAHL', 'MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'KONDORIA', 'PASS'],
+  24: ['DAHL', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'KONDORIA', 'PASS'],
+  25: ['ONEAL', 'ONEAL', 'DAHL', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'KONDORIA', 'PASS'],
+  26: ['MINVO', 'MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS'],
+  27: ['DAHL', 'MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS'],
+  28: ['MINVO', 'MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'KONDORIA', 'PASS', 'PASS'],
+  29: ['DAHL', 'DAHL', 'MINVO', 'MINVO', 'OVAPE', 'KONDORIA', 'PASS', 'PONTAN'],
+  30: ['MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN'],
+  31: ['MINVO', 'MINVO', 'MINVO', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN'],
+  32: ['DAHL', 'DAHL', 'MINVO', 'MINVO', 'OVAPE', 'PASS', 'PASS', 'PONTAN'],
+  33: ['MINVO', 'MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'PASS', 'PASS', 'PONTAN'],
+  34: ['MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN'],
+  35: ['OVAPE', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PASS', 'PONTAN'],
+  36: ['MINVO', 'MINVO', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PASS', 'PONTAN'],
+  37: ['MINVO', 'MINVO', 'OVAPE', 'OVAPE', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  38: ['MINVO', 'MINVO', 'MINVO', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  39: ['OVAPE', 'OVAPE', 'KONDORIA', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  40: ['MINVO', 'MINVO', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  41: ['OVAPE', 'OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  42: ['MINVO', 'MINVO', 'OVAPE', 'PASS', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  43: ['OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  44: ['MINVO', 'OVAPE', 'OVAPE', 'PASS', 'PASS', 'PASS', 'PONTAN', 'PONTAN'],
+  45: ['OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN'],
+  46: ['MINVO', 'MINVO', 'OVAPE', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN'],
+  47: ['OVAPE', 'OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN'],
+  48: ['OVAPE', 'OVAPE', 'PASS', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN'],
+  49: ['OVAPE', 'KONDORIA', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN', 'PONTAN'],
+  50: ['PASS', 'PASS', 'PASS', 'PASS', 'PONTAN', 'PONTAN', 'PONTAN', 'PONTAN'],
 };
+
+/**
+ * Returns canonical trap enemy difficulty corresponding to stage:
+ * Stage 1: ONEAL, Stage 2: DAHL, Stage 3: MINVO, Stage 4: KONDORIA,
+ * Stage 5-6: OVAPE, Stage 7-9: PASS, Stage 10+: PONTAN.
+ */
+export function getTrapEnemyTypeForStage(stage: number): EnemyType {
+  const s = Math.max(1, Math.floor(stage));
+  if (s === 1) return 'ONEAL';
+  if (s === 2) return 'DAHL';
+  if (s === 3) return 'MINVO';
+  if (s === 4) return 'KONDORIA';
+  if (s === 5 || s === 6) return 'OVAPE';
+  if (s >= 7 && s <= 9) return 'PASS';
+  return 'PONTAN'; // Stage 10+
+}
 
 export class EnemiesEngine implements IEnemiesEngine {
   private _enemies: EnemyEntity[] = [];
@@ -65,8 +122,7 @@ export class EnemiesEngine implements IEnemiesEngine {
     if (s in STAGE_ENEMY_ROSTERS) {
       return STAGE_ENEMY_ROSTERS[s];
     }
-    // Progression scaling for stages > 10
-    return ['ONEAL', 'DAHL', 'MINVO', 'MINVO', 'OVAPE', 'KONDORIA', 'KONDORIA', 'PONTAN'];
+    return STAGE_ENEMY_ROSTERS[50];
   }
 
   public spawnEnemy(
@@ -137,18 +193,37 @@ export class EnemiesEngine implements IEnemiesEngine {
     this.clearAll();
     const roster = this.getStageEnemyRoster(stage);
 
-    // Collect qualified interior candidate tiles outside safe spawn zone
-    const candidates: { x: number; y: number }[] = [];
-    for (let y = 1; y < 12; y++) {
-      for (let x = 1; x < 30; x++) {
-        const dist = Math.abs(x - 1) + Math.abs(y - 1);
-        if (dist >= SPAWN_EXCLUSION_MANHATTAN_DISTANCE) {
-          const tile = grid.getTile(x, y);
-          if (tile !== TileType.HARD_WALL) {
-            candidates.push({ x, y });
+    // Rule 3: Safe spawn zone in Stage 1 and initial level spawns:
+    // No enemy may spawn in row ty === 1 with tx < 8, nor in col tx === 1 with ty < 7
+    // (prevents direct line of sight to player spawn (1, 1)).
+    // Requires minimum Manhattan distance of >= 8 tiles from (1, 1),
+    // falling back to >= 5 only if candidate pool is smaller than roster count.
+    const isExcludedFromInitialSpawn = (x: number, y: number): boolean => {
+      if (y === 1 && x < 8) return true;
+      if (x === 1 && y < 7) return true;
+      return false;
+    };
+
+    const getCandidates = (minDist: number) => {
+      const list: { x: number; y: number }[] = [];
+      for (let y = 1; y < 12; y++) {
+        for (let x = 1; x < 30; x++) {
+          if (isExcludedFromInitialSpawn(x, y)) continue;
+          const dist = Math.abs(x - 1) + Math.abs(y - 1);
+          if (dist >= minDist) {
+            const tile = grid.getTile(x, y);
+            if (tile !== TileType.HARD_WALL) {
+              list.push({ x, y });
+            }
           }
         }
       }
+      return list;
+    };
+
+    let candidates = getCandidates(STAGE_SPAWN_INITIAL_MIN_DISTANCE);
+    if (candidates.length < roster.length) {
+      candidates = getCandidates(SPAWN_EXCLUSION_MANHATTAN_DISTANCE);
     }
 
     // Shuffle candidate tiles with provided RNG
@@ -304,6 +379,16 @@ export class EnemiesEngine implements IEnemiesEngine {
     }
 
     return spawned;
+  }
+
+  public spawnTrapWave(
+    stage: number,
+    tx: number,
+    ty: number,
+    rng: () => number = Math.random
+  ): readonly EnemyEntity[] {
+    const enemyType = getTrapEnemyTypeForStage(stage);
+    return this.spawnFromTile(tx, ty, 8, enemyType, rng);
   }
 
   public spawnFromTile(
@@ -498,10 +583,10 @@ export class EnemiesEngine implements IEnemiesEngine {
     const isPerp2Open = canPass(tx + this.dirX(perp2), ty + this.dirY(perp2));
     const isReverseOpen = canPass(tx + this.dirX(reverse), ty + this.dirY(reverse));
 
-    // ONEAL burst check
+    // ONEAL burst check (persigue si está a <= 4 tiles)
     if (enemy.type === 'ONEAL') {
       const distToPlayer = Math.abs(tx - playerTile.x) + Math.abs(ty - playerTile.y);
-      if (distToPlayer <= 5) {
+      if (distToPlayer <= 4) {
         enemy.speed = ONEAL_BURST_SPEED; // 0.75 px/tick
       } else {
         enemy.speed = ENEMY_BASE_SPEEDS.ONEAL; // 0.5 px/tick
@@ -514,9 +599,10 @@ export class EnemiesEngine implements IEnemiesEngine {
     if (isPerp1Open) openDirections.push(perp1);
     if (isPerp2Open) openDirections.push(perp2);
 
-    // Chasing Archetypes: MINVO, KONDORIA, PONTAN, or ONEAL in burst
+    // Chasing Archetypes: MINVO, PASS, KONDORIA, PONTAN, or ONEAL in burst
     const isChaser =
       enemy.type === 'MINVO' ||
+      enemy.type === 'PASS' ||
       enemy.type === 'KONDORIA' ||
       enemy.type === 'PONTAN' ||
       (enemy.type === 'ONEAL' && enemy.speed === ONEAL_BURST_SPEED);

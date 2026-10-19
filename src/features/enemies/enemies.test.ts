@@ -4,7 +4,7 @@ import { createOrdinanceEngine } from '../ordinance/ordinance.engine';
 import { createPowerupEngine } from '../powerups/powerups.engine';
 import { createStageGrid } from '../stage-grid/stage-grid.engine';
 import { TileType } from '../stage-grid/types';
-import { createEnemiesEngine } from './enemies.engine';
+import { createEnemiesEngine, getTrapEnemyTypeForStage } from './enemies.engine';
 import {
   ENEMY_BASE_SCORES,
   ENEMY_BASE_SPEEDS,
@@ -13,6 +13,7 @@ import {
   ENEMY_WALLPASS_CAPABILITIES,
   EnemyType,
   SPAWN_EXCLUSION_MANHATTAN_DISTANCE,
+  STAGE_SPAWN_INITIAL_MIN_DISTANCE,
 } from './types';
 
 describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
@@ -22,43 +23,47 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       'ONEAL',
       'DAHL',
       'MINVO',
-      'OVAPE',
       'KONDORIA',
+      'OVAPE',
+      'PASS',
       'PONTAN',
     ];
 
-    it('contains exactly 7 canonical NES Bomberman enemies', () => {
-      expect(allEnemies).toHaveLength(7);
+    it('contains exactly 8 canonical NES Bomberman enemies', () => {
+      expect(allEnemies).toHaveLength(8);
     });
 
-    it('defines authentic base point values (100, 200, 400, 800, 1000, 2000, 8000)', () => {
+    it('defines authentic base point values (100, 200, 400, 800, 1000, 2000, 4000, 8000)', () => {
       expect(ENEMY_BASE_SCORES.BALLOM).toBe(100);
       expect(ENEMY_BASE_SCORES.ONEAL).toBe(200);
       expect(ENEMY_BASE_SCORES.DAHL).toBe(400);
       expect(ENEMY_BASE_SCORES.MINVO).toBe(800);
-      expect(ENEMY_BASE_SCORES.OVAPE).toBe(1000);
-      expect(ENEMY_BASE_SCORES.KONDORIA).toBe(2000);
+      expect(ENEMY_BASE_SCORES.KONDORIA).toBe(1000);
+      expect(ENEMY_BASE_SCORES.OVAPE).toBe(2000);
+      expect(ENEMY_BASE_SCORES.PASS).toBe(4000);
       expect(ENEMY_BASE_SCORES.PONTAN).toBe(8000);
     });
 
     it('defines authentic movement speeds in px/tick at 60Hz', () => {
       expect(ENEMY_BASE_SPEEDS.BALLOM).toBe(0.375);
       expect(ENEMY_BASE_SPEEDS.ONEAL).toBe(0.5);
-      expect(ENEMY_BASE_SPEEDS.DAHL).toBe(0.5);
+      expect(ENEMY_BASE_SPEEDS.DAHL).toBe(0.625);
       expect(ENEMY_BASE_SPEEDS.MINVO).toBe(0.75);
-      expect(ENEMY_BASE_SPEEDS.OVAPE).toBe(0.375);
       expect(ENEMY_BASE_SPEEDS.KONDORIA).toBe(0.25);
+      expect(ENEMY_BASE_SPEEDS.OVAPE).toBe(0.375);
+      expect(ENEMY_BASE_SPEEDS.PASS).toBe(1.0);
       expect(ENEMY_BASE_SPEEDS.PONTAN).toBe(1.125);
     });
 
-    it('grants soft block wallpass strictly to ghost enemies (OVAPE, KONDORIA, PONTAN)', () => {
+    it('grants soft block wallpass strictly to ghost enemies (KONDORIA, OVAPE, PONTAN)', () => {
       expect(ENEMY_WALLPASS_CAPABILITIES.BALLOM).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.ONEAL).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.DAHL).toBe(false);
       expect(ENEMY_WALLPASS_CAPABILITIES.MINVO).toBe(false);
+      expect(ENEMY_WALLPASS_CAPABILITIES.PASS).toBe(false);
 
-      expect(ENEMY_WALLPASS_CAPABILITIES.OVAPE).toBe(true);
       expect(ENEMY_WALLPASS_CAPABILITIES.KONDORIA).toBe(true);
+      expect(ENEMY_WALLPASS_CAPABILITIES.OVAPE).toBe(true);
       expect(ENEMY_WALLPASS_CAPABILITIES.PONTAN).toBe(true);
     });
 
@@ -66,13 +71,14 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(ENEMY_DEATH_DURATION_MS).toBe(600);
       expect(ENEMY_SIZE).toBe(16);
       expect(SPAWN_EXCLUSION_MANHATTAN_DISTANCE).toBe(5);
+      expect(STAGE_SPAWN_INITIAL_MIN_DISTANCE).toBe(8);
     });
   });
 
   describe('Stage Enemy Rosters (getStageEnemyRoster)', () => {
     const engine = createEnemiesEngine();
 
-    it('guarantees Stage 1 roster is 6 BALLOM', () => {
+    it('guarantees Stage 1 roster is strictly 6 BALLOM', () => {
       const roster = engine.getStageEnemyRoster(1);
       expect(roster).toHaveLength(6);
       expect(roster.every((t) => t === 'BALLOM')).toBe(true);
@@ -93,14 +99,32 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(roster).toEqual(['BALLOM', 'ONEAL', 'DAHL', 'DAHL', 'MINVO', 'MINVO']);
     });
 
-    it('guarantees Stage 5 introduces OVAPE', () => {
+    it('guarantees Stage 5 roster is 4 ONEAL, 3 DAHL', () => {
       const roster = engine.getStageEnemyRoster(5);
-      expect(roster).toContain('OVAPE');
+      expect(roster).toEqual(['ONEAL', 'ONEAL', 'ONEAL', 'ONEAL', 'DAHL', 'DAHL', 'DAHL']);
     });
 
-    it('guarantees Stage 10 contains PONTAN', () => {
+    it('guarantees Stage 6 introduces KONDORIA', () => {
+      const roster = engine.getStageEnemyRoster(6);
+      expect(roster).toContain('KONDORIA');
+    });
+
+    it('guarantees Stage 10 roster contains OVAPE and 3 KONDORIA', () => {
       const roster = engine.getStageEnemyRoster(10);
-      expect(roster).toContain('PONTAN');
+      expect(roster).toContain('OVAPE');
+      expect(roster.filter((e) => e === 'KONDORIA')).toHaveLength(3);
+    });
+
+    it('guarantees Stage 14 contains 7 OVAPE and 1 PASS', () => {
+      const roster = engine.getStageEnemyRoster(14);
+      expect(roster.filter((e) => e === 'OVAPE')).toHaveLength(7);
+      expect(roster).toContain('PASS');
+    });
+
+    it('guarantees Stage 50 contains 4 PASS and 4 PONTAN', () => {
+      const roster = engine.getStageEnemyRoster(50);
+      expect(roster.filter((e) => e === 'PASS')).toHaveLength(4);
+      expect(roster.filter((e) => e === 'PONTAN')).toHaveLength(4);
     });
   });
 
@@ -151,6 +175,33 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(enemy).not.toBeNull();
       expect(enemy?.x).toBe(112.0);
       expect(enemy?.y).toBe(48.0);
+    });
+
+    it('spawnStageEnemies() enforces Manhattan distance >= 8 and blocks direct line-of-sight in (1,1)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      const spawned = engine.spawnStageEnemies(1, grid);
+      expect(spawned).toHaveLength(6);
+      expect(spawned.every((e) => e.type === 'BALLOM')).toBe(true);
+
+      for (const enemy of spawned) {
+        const tx = Math.round(enemy.x / 16);
+        const ty = Math.round(enemy.y / 16);
+        const dist = Math.abs(tx - 1) + Math.abs(ty - 1);
+
+        // Manhattan distance must be >= 8 tiles
+        expect(dist).toBeGreaterThanOrEqual(STAGE_SPAWN_INITIAL_MIN_DISTANCE);
+
+        // Safe corridor: never on row ty === 1 with tx < 8
+        if (ty === 1) {
+          expect(tx).toBeGreaterThanOrEqual(8);
+        }
+        // Safe corridor: never on col tx === 1 with ty < 7
+        if (tx === 1) {
+          expect(ty).toBeGreaterThanOrEqual(7);
+        }
+      }
     });
   });
 
@@ -504,6 +555,45 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(spawned).toHaveLength(4);
       expect(spawned.every((e) => e.x === pTx * 16.0 && e.y === pTy * 16.0)).toBe(true);
       expect(spawned.every((e) => e.type === 'PONTAN')).toBe(true);
+    });
+
+    it('determines canonical trap wave enemy type based on stage (Stage 1: ONEAL .. Stage 10+: PONTAN)', () => {
+      expect(getTrapEnemyTypeForStage(1)).toBe('ONEAL');
+      expect(getTrapEnemyTypeForStage(2)).toBe('DAHL');
+      expect(getTrapEnemyTypeForStage(3)).toBe('MINVO');
+      expect(getTrapEnemyTypeForStage(4)).toBe('KONDORIA');
+      expect(getTrapEnemyTypeForStage(5)).toBe('OVAPE');
+      expect(getTrapEnemyTypeForStage(6)).toBe('OVAPE');
+      expect(getTrapEnemyTypeForStage(7)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(8)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(9)).toBe('PASS');
+      expect(getTrapEnemyTypeForStage(10)).toBe('PONTAN');
+      expect(getTrapEnemyTypeForStage(50)).toBe('PONTAN');
+    });
+
+    it('spawnTrapWave() spawns exactly 8 scaled enemies from exact tile coordinates', () => {
+      const engine = createEnemiesEngine();
+
+      // Stage 1 trap: 8 ONEAL
+      const wave1 = engine.spawnTrapWave(1, 10, 5);
+      expect(wave1).toHaveLength(8);
+      expect(wave1.every((e) => e.type === 'ONEAL')).toBe(true);
+      expect(wave1.every((e) => e.x === 10 * 16.0 && e.y === 5 * 16.0)).toBe(true);
+
+      // Stage 3 trap: 8 MINVO
+      const wave3 = engine.spawnTrapWave(3, 12, 6);
+      expect(wave3).toHaveLength(8);
+      expect(wave3.every((e) => e.type === 'MINVO')).toBe(true);
+
+      // Stage 7 trap: 8 PASS
+      const wave7 = engine.spawnTrapWave(7, 8, 4);
+      expect(wave7).toHaveLength(8);
+      expect(wave7.every((e) => e.type === 'PASS')).toBe(true);
+
+      // Stage 10 trap: 8 PONTAN
+      const wave10 = engine.spawnTrapWave(10, 15, 7);
+      expect(wave10).toHaveLength(8);
+      expect(wave10.every((e) => e.type === 'PONTAN')).toBe(true);
     });
   });
 

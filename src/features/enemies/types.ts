@@ -3,15 +3,16 @@ import type { Explosion, IOrdinanceEngine } from '../ordinance/types';
 import type { IStageGridEngine } from '../stage-grid/types';
 
 /**
- * The 7 Canonical Enemy Types in NES Bomberman (1985).
+ * The 8 Canonical Enemy Types in NES Bomberman (1985).
  */
 export type EnemyType =
   | 'BALLOM'
   | 'ONEAL'
   | 'DAHL'
   | 'MINVO'
-  | 'OVAPE'
   | 'KONDORIA'
+  | 'OVAPE'
+  | 'PASS'
   | 'PONTAN';
 
 /**
@@ -30,6 +31,7 @@ export type EnemyDirection = 'UP' | 'DOWN' | 'LEFT' | 'RIGHT';
 export const ENEMY_SIZE = 16;
 export const ENEMY_DEATH_DURATION_MS = 600;
 export const SPAWN_EXCLUSION_MANHATTAN_DISTANCE = 5;
+export const STAGE_SPAWN_INITIAL_MIN_DISTANCE = 8;
 
 /**
  * Official NES Bomberman Base Scores per Enemy
@@ -39,8 +41,9 @@ export const ENEMY_BASE_SCORES: Readonly<Record<EnemyType, number>> = {
   ONEAL: 200,
   DAHL: 400,
   MINVO: 800,
-  OVAPE: 1000,
-  KONDORIA: 2000,
+  KONDORIA: 1000,
+  OVAPE: 2000,
+  PASS: 4000,
   PONTAN: 8000,
 };
 
@@ -52,8 +55,9 @@ export const ENEMY_BASE_SPEEDS: Readonly<Record<EnemyType, number>> = {
   BALLOM: 0.375,
   OVAPE: 0.375,
   ONEAL: 0.5,
-  DAHL: 0.5,
+  DAHL: 0.625,
   MINVO: 0.75,
+  PASS: 1.0,
   PONTAN: 1.125,
 };
 
@@ -67,8 +71,9 @@ export const ENEMY_WALLPASS_CAPABILITIES: Readonly<Record<EnemyType, boolean>> =
   ONEAL: false,
   DAHL: false,
   MINVO: false,
-  OVAPE: true,
   KONDORIA: true,
+  OVAPE: true,
+  PASS: false,
   PONTAN: true,
 };
 
@@ -190,6 +195,18 @@ export interface IEnemiesEngine {
     doorTy: number,
     count?: number,
     type?: EnemyType,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns the authentic NES penalty trap of 8 enemies corresponding to the stage difficulty:
+   * Stage 1: 8 ONEAL, Stage 2: 8 DAHL, Stage 3: 8 MINVO, Stage 4: 8 KONDORIA,
+   * Stage 5-6: 8 OVAPE, Stage 7-9: 8 PASS, Stage 10+: 8 PONTAN.
+   */
+  spawnTrapWave(
+    stage: number,
+    tx: number,
+    ty: number,
     rng?: () => number
   ): readonly EnemyEntity[];
 
