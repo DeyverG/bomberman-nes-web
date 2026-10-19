@@ -169,38 +169,68 @@ export class AudioEngine implements IAudioEngine {
     if (!ctx || !this.masterGain) return;
 
     try {
+      const t = ctx.currentTime;
       const duration = 0.48; // 480ms explosion duration
       const sampleRate = ctx.sampleRate || 44100;
       const bufferSize = Math.floor(sampleRate * duration);
       const buffer = ctx.createBuffer(1, bufferSize, sampleRate);
       const data = buffer.getChannelData(0);
 
-      // Synthesize white noise buffer
+      // 1. Capa 1: Ruido 8-Bit LFSR Crunch (bloques de 6 a 8 muestras con -1 o +1)
+      let sampleVal = Math.random() < 0.5 ? -1 : 1;
+      let stepCount = 0;
+      let nextStep = 6 + Math.floor(Math.random() * 3); // 6, 7 o 8 muestras
       for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
+        if (stepCount >= nextStep) {
+          sampleVal = Math.random() < 0.5 ? -1 : 1;
+          stepCount = 0;
+          nextStep = 6 + Math.floor(Math.random() * 3);
+        }
+        data[i] = sampleVal;
+        stepCount++;
       }
 
       const noise = ctx.createBufferSource();
       noise.buffer = buffer;
 
-      // Filter: Lowpass sweeping down from 900Hz to 80Hz
+      // Filter: Lowpass 3500Hz cayendo a 140Hz en 480ms con resonancia Q = 3.5
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      const t = ctx.currentTime;
-      filter.frequency.setValueAtTime(900, t);
-      filter.frequency.exponentialRampToValueAtTime(80, t + duration);
+      if (filter.Q) {
+        filter.Q.value = 3.5;
+      }
+      filter.frequency.setValueAtTime(3500, t);
+      filter.frequency.exponentialRampToValueAtTime(140, t + duration);
 
-      // Gain envelope decaying over 480ms
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.35, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+      // GainNode Capa 1: 0.9 al inicio (attack en 0.005s) cayendo a 0.01 en 480ms
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.001, t);
+      noiseGain.gain.linearRampToValueAtTime(0.9, t + 0.005);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, t + duration);
 
       noise.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.masterGain);
+      filter.connect(noiseGain);
+      noiseGain.connect(this.masterGain);
 
       noise.start(t);
       noise.stop(t + duration);
+
+      // 2. Capa 2: Sub-Bass Impact Boom (Golpe inicial)
+      // OscillatorNode triangle/sawtooth 160Hz cayendo a 28Hz en 300ms
+      const subOsc = ctx.createOscillator();
+      subOsc.type = 'triangle';
+      subOsc.frequency.setValueAtTime(160, t);
+      subOsc.frequency.exponentialRampToValueAtTime(28, t + 0.3);
+
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0.85, t);
+      subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.32);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.masterGain);
+
+      subOsc.start(t);
+      subOsc.stop(t + 0.32);
     } catch {
       // Graceful fallback
     }

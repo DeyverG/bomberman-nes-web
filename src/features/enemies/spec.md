@@ -49,13 +49,27 @@ Any tile where $|tx - 1| + |ty - 1| < 5$ is strictly forbidden for enemy spawnin
 | **Stage 10** | `1 ONEAL, 1 DAHL, 1 MINVO, 1 OVAPE, 3 KONDORIA, 1 PONTAN` | 8 |
 | **Stage 11+** | Cyclic scaled progression containing high-tier ghosts (`OVAPE`, `KONDORIA`, `PONTAN`) | 8 |
 
-### 3.3 Penalty Wave (Punishment Spawns)
-Exactly **8 `PONTAN`** enemies are spawned under any of the following statutory violations:
-1. An active explosion flame impacts a revealed door ([`DOOR_REVEALED`](file:///C:/Users/dedag/Desktop/Personal/bomberman/src/features/stage-grid/types.ts#L25)) or power-up ([`POWERUP_REVEALED`](file:///C:/Users/dedag/Desktop/Personal/bomberman/src/features/stage-grid/types.ts#L26)).
-2. The match countdown timer reaches zero (`TIME === 0`).
-The 8 `PONTAN` spawn outside the safe spawn zone and immediately hunt Bomberman at `1.125 px/tick` with full soft block wallpass.
+### 3.3 Canonical NES Punishment Mechanics: TIME = 0:00 (Pontan Horde & Farming) & Door/Powerup Trap
 
-### 3.2 Tile Qualification
+#### 3.3.1 Reloj en TIME = 0:00 (Horda Masiva de Pontans y Farming de Puntos)
+- Cuando el temporizador de la fase (`stageTimeRemaining`) desciende a `0`, el reloj se detiene en `0` y Bomberman **NO muere automáticamente**. Bomberman permanece con vida (`player.state === 'ALIVE'`).
+- Se activa la bandera `timeOutTriggered = true` (exactamente una sola vez por intento de nivel) y se invoca `enemies.spawnTimeOutHorde(grid, playerPos)`:
+  - Genera una horda masiva de **12 enemigos `PONTAN`** (monedas rotatorias de 8000 puntos base, con `wallpass: true` y velocidad `1.125 px/tick`).
+  - Aparecen distribuidos en coordenadas válidas del mapa (incluyendo la casilla de la puerta si ha sido revelada y los bordes del mapa), respetando estrictamente una distancia Manhattan $\ge 5$ respecto a la posición actual de Bomberman (`playerPos`) para garantizar margen de reacción táctica.
+  - El jugador puede maniobrar, esquivar y detonar bombas para destruir a los `PONTAN`, obteniendo 8000 puntos base por cada uno más los multiplicadores de combo simultáneo ($1\times, 2\times, 4\times, 8\times$).
+  - Una vez que todos los enemigos son derrotados (`enemies.getAliveCount() === 0` o `enemies.aliveCount === 0`), Bomberman puede ingresar libremente a la puerta de salida para ganar la fase (`STAGE_CLEARED`).
+
+#### 3.3.2 Trampa de la Puerta (`DOOR_REVEALED`) y del Power-Up (`POWERUP_REVEALED`)
+- Cuando la llama de una explosión alcanza la casilla de una puerta revelada (`DOOR_REVEALED`):
+  - La puerta **NO se destruye**.
+  - Invoca `enemies.spawnFromTile(doorTx, doorTy, count, type)`.
+  - Nacen **desde la misma coordenada exacta de la puerta $(doorTx, doorTy)$** un grupo de **4 a 8 enemigos** (`ONEAL` / `MINVO` / `PONTAN`), dispersándose en las direcciones disponibles.
+  - Los nuevos enemigos incrementan inmediatamente el conteo de enemigos vivos (`aliveCount`), bloqueando la salida de la puerta hasta que el jugador vuelva a eliminarlos a todos.
+- Cuando la llama alcanza un potenciador revelado (`POWERUP_REVEALED`):
+  - El ítem se calcina y desaparece, transformando la casilla en `TileType.EMPTY`.
+  - También invoca `enemies.spawnFromTile(tx, ty, count, type)`, haciendo nacer de 4 a 8 enemigos desde dicha coordenada $(tx, ty)$.
+
+### 3.4 Tile Qualification
 - **Standard Enemies (`BALLOM`, `ONEAL`, `DAHL`, `MINVO`):**
   Must spawn on tiles that are `TileType.EMPTY` (walkable ground, no hard walls, no soft blocks).
 - **Ghost Enemies (`OVAPE`, `KONDORIA`, `PONTAN`):**

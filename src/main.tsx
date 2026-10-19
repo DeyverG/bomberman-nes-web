@@ -263,10 +263,10 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
           stageTimeRemaining -= 1;
           emitHudUpdate({ time: stageTimeRemaining });
 
-          // TIME_OUT punishment: spawns 8 PONTAN enemies once when time runs out
+          // TIME = 0:00: Clock stops at 0, Bomberman remains alive, spawns 12 Pontans
           if (stageTimeRemaining === 0 && !timeOutTriggered) {
             timeOutTriggered = true;
-            enemiesEngine.spawnPunishmentWave(stageGrid, player);
+            enemiesEngine.spawnTimeOutHorde(stageGrid, player.centerTile);
           }
         }
       }
@@ -309,8 +309,12 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
         audioEngine.playExplosion();
       }
 
-      // Check if bomb flames struck DOOR_REVEALED or POWERUP_REVEALED (punishment spawn)
-      if (ordinanceEngine.consumePendingPunishmentWaves() > 0) {
+      // Check if bomb flames struck DOOR_REVEALED or POWERUP_REVEALED (tile punishment spawn)
+      const pendingTileSpawns = ordinanceEngine.consumePendingTileSpawns();
+      for (const spawn of pendingTileSpawns) {
+        enemiesEngine.spawnFromTile(spawn.tx, spawn.ty);
+      }
+      if (pendingTileSpawns.length === 0 && ordinanceEngine.consumePendingPunishmentWaves() > 0) {
         enemiesEngine.spawnPunishmentWave(stageGrid, player);
       }
 
@@ -349,7 +353,9 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       }
 
       // Check if all enemies were cleared in the stage
-      if (
+      if (enemiesEngine.aliveCount > 0) {
+        enemiesClearedSoundPlayed = false;
+      } else if (
         !enemiesClearedSoundPlayed &&
         enemiesEngine.aliveCount === 0 &&
         enemiesEngine.activeEnemies.length > 0
@@ -366,7 +372,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       }
 
       // Check Stage Clear via Exit Door (requires aliveCount === 0)
-      const enemiesRemaining = enemiesEngine.aliveCount;
+      const enemiesRemaining = enemiesEngine.getAliveCount();
       const doorResult = powerupEngine.checkDoorEntry(player, stageGrid, enemiesRemaining);
       if (doorResult && doorResult.type === 'STAGE_CLEARED') {
         isGameActive = false;

@@ -10,12 +10,14 @@ import {
   FlameSegmentType,
   FUSE_DURATION_MS,
   IOrdinanceEngine,
+  PendingTileSpawn,
 } from './types';
 
 export class OrdinanceEngine implements IOrdinanceEngine {
   private _activeBombs: Bomb[] = [];
   private _activeExplosions: Explosion[] = [];
   private _pendingPunishmentWaves = 0;
+  private _pendingTileSpawns: PendingTileSpawn[] = [];
   private bombIdCounter = 0;
   private explosionIdCounter = 0;
 
@@ -173,6 +175,7 @@ export class OrdinanceEngine implements IOrdinanceEngine {
           const detRes = grid.detonateTile(rx, ry);
           if ('spawnPunishmentEnemies' in detRes && detRes.spawnPunishmentEnemies) {
             this._pendingPunishmentWaves++;
+            this._pendingTileSpawns.push({ tx: rx, ty: ry, tileType: tile });
           }
           // Terminal flame segment placed on early stopping tile
           segments.push({ tx: rx, ty: ry, type: end });
@@ -323,10 +326,18 @@ export class OrdinanceEngine implements IOrdinanceEngine {
     return count;
   }
 
+  public consumePendingTileSpawns(): readonly PendingTileSpawn[] {
+    const spawns = [...this._pendingTileSpawns];
+    this._pendingTileSpawns = [];
+    this._pendingPunishmentWaves = 0;
+    return spawns;
+  }
+
   public clear(): void {
     this._activeBombs = [];
     this._activeExplosions = [];
     this._pendingPunishmentWaves = 0;
+    this._pendingTileSpawns = [];
   }
 }
 

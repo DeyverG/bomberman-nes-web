@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createBomberman } from '../bomberman/bomberman.engine';
 import { createOrdinanceEngine } from '../ordinance/ordinance.engine';
+import { createPowerupEngine } from '../powerups/powerups.engine';
 import { createStageGrid } from '../stage-grid/stage-grid.engine';
 import { TileType } from '../stage-grid/types';
 import { createEnemiesEngine } from './enemies.engine';
@@ -301,6 +302,208 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(wave.every((e) => e.type === 'PONTAN')).toBe(true);
       expect(wave.every((e) => e.speed === 1.125)).toBe(true);
       expect(wave.every((e) => e.hasWallpass === true)).toBe(true);
+    });
+  });
+
+  describe('Canonical NES TIME = 0:00 Pontan Horde & Farming (spawnTimeOutHorde)', () => {
+    it('spawns exactly 12 PONTAN enemies with speed 1.125, wallpass true, and 8000 base points', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.x = 16.0;
+      player.y = 16.0;
+
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(12);
+      expect(engine.getAliveCount()).toBe(12);
+      expect(horde.every((e) => e.type === 'PONTAN')).toBe(true);
+      expect(horde.every((e) => e.speed === 1.125)).toBe(true);
+      expect(horde.every((e) => e.hasWallpass === true)).toBe(true);
+      expect(horde.every((e) => e.baseScore === 8000)).toBe(true);
+      expect(horde.every((e) => e.state === 'ALIVE')).toBe(true);
+    });
+
+    it('spawns all 12 Pontans respecting Manhattan distance >= 5 from current Bomberman position', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Bomberman at tile (10, 5) -> world coords (160, 80)
+      player.x = 160.0;
+      player.y = 80.0;
+
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(12);
+
+      for (const enemy of horde) {
+        const enemyTx = Math.round(enemy.x / 16.0);
+        const enemyTy = Math.round(enemy.y / 16.0);
+        const dist = Math.abs(enemyTx - 10) + Math.abs(enemyTy - 5);
+        expect(dist).toBeGreaterThanOrEqual(5);
+      }
+    });
+
+    it('does NOT automatically kill Bomberman when TIME reaches 0:00 and spawnTimeOutHorde is triggered', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+
+      expect(player.state).toBe('ALIVE');
+
+      // Trigger timeout horde
+      engine.spawnTimeOutHorde(grid, player);
+
+      // Bomberman is still alive, clock hit 0:00 without killing the player
+      expect(player.state).toBe('ALIVE');
+      expect(engine.getAliveCount()).toBe(12);
+    });
+
+    it('allows player to farm Pontans for 8000 points base + combos and clear stage once count hits 0', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+      const ordinance = createOrdinanceEngine();
+      const powerups = createPowerupEngine();
+
+      player.x = 16.0;
+      player.y = 16.0;
+      const initialScore = player.stats.score;
+
+      // Spawn timeout horde
+      engine.spawnTimeOutHorde(grid, player);
+      expect(engine.getAliveCount()).toBe(12);
+
+      // Door coordinates from grid
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+
+      // While 12 Pontans are alive, attempting door entry does NOT clear stage
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+      const blockedDoorResult = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(blockedDoorResult).toBeNull();
+
+      // Eliminate Pontans with bomb flames
+      // Spawn two Pontans at (6, 1) and (7, 1) on EMPTY ground
+      engine.clearAll();
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+      const p1 = engine.spawnEnemy('PONTAN', 6, 1, grid);
+      const p2 = engine.spawnEnemy('PONTAN', 7, 1, grid);
+      expect(p1).not.toBeNull();
+      expect(p2).not.toBeNull();
+
+      player.stats.flameRange = 3;
+      player.x = 96.0;
+      player.y = 16.0;
+      const bomb = ordinance.placeBomb(6, 1, player, grid);
+      ordinance.detonateBomb(bomb!.id, grid, player);
+
+      const kills = engine.checkFlameCollisions(ordinance.activeExplosions, player);
+      expect(kills).toHaveLength(2);
+      expect(kills[0].pointsAwarded).toBe(8000); // 1x combo = 8000
+      expect(kills[1].pointsAwarded).toBe(16000); // 2x combo = 16000
+      expect(player.stats.score).toBe(initialScore + 24000);
+
+      // Finish decay
+      engine.update(600, player, grid, ordinance);
+      expect(engine.getAliveCount()).toBe(0);
+
+      // With 0 enemies alive, standing on door succeeds
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+      const clearedDoorResult = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(clearedDoorResult?.type).toBe('STAGE_CLEARED');
+    });
+  });
+
+  describe('Door & Power-Up Trap Spawns (spawnFromTile)', () => {
+    it('spawns a group of 4 to 8 enemies originating at the exact tile coordinates of the door', () => {
+      const engine = createEnemiesEngine();
+      const doorTx = 14;
+      const doorTy = 5;
+
+      const spawned = engine.spawnFromTile(doorTx, doorTy);
+      expect(spawned.length).toBeGreaterThanOrEqual(4);
+      expect(spawned.length).toBeLessThanOrEqual(8);
+      expect(engine.getAliveCount()).toBe(spawned.length);
+
+      // Verifies exact tile coordinates (x = tx * 16, y = ty * 16)
+      expect(spawned.every((e) => e.x === doorTx * 16.0 && e.y === doorTy * 16.0)).toBe(true);
+
+      // Verifies enemy archetypes (ONEAL, MINVO, PONTAN)
+      const allowedTypes: EnemyType[] = ['ONEAL', 'MINVO', 'PONTAN'];
+      expect(spawned.every((e) => allowedTypes.includes(e.type))).toBe(true);
+      expect(spawned.every((e) => e.state === 'ALIVE')).toBe(true);
+    });
+
+    it('disperses enemies across available cardinal directions upon spawning', () => {
+      const engine = createEnemiesEngine();
+      const spawned = engine.spawnFromTile(10, 5, 4);
+
+      expect(spawned).toHaveLength(4);
+      const directions = spawned.map((e) => e.direction);
+      // All 4 cardinal directions assigned sequentially
+      expect(directions).toContain('UP');
+      expect(directions).toContain('RIGHT');
+      expect(directions).toContain('DOWN');
+      expect(directions).toContain('LEFT');
+    });
+
+    it('spawns custom count and explicit enemy type when parameters are provided', () => {
+      const engine = createEnemiesEngine();
+      const spawned = engine.spawnFromTile(8, 8, 6, 'MINVO');
+
+      expect(spawned).toHaveLength(6);
+      expect(spawned.every((e) => e.type === 'MINVO')).toBe(true);
+      expect(spawned.every((e) => e.x === 8 * 16.0 && e.y === 8 * 16.0)).toBe(true);
+    });
+
+    it('increases aliveCount when door is bombed, blocking exit until newly spawned enemies are cleared', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, { primary: null, secondary: null }, grid);
+      const powerups = createPowerupEngine();
+
+      const doorCoord = grid.indexToCoord(grid.doorIndex);
+      grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
+      player.x = doorCoord.x * 16.0;
+      player.y = doorCoord.y * 16.0;
+
+      // Initially 0 enemies alive
+      expect(engine.getAliveCount()).toBe(0);
+      const canExitInitially = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(canExitInitially?.type).toBe('STAGE_CLEARED');
+
+      // Bombing the revealed door triggers spawnFromTile(doorCoord.x, doorCoord.y)
+      engine.spawnFromTile(doorCoord.x, doorCoord.y, 5, 'ONEAL');
+      expect(engine.getAliveCount()).toBe(5);
+
+      // Exit is now blocked because getAliveCount() > 0
+      const blockedExit = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(blockedExit).toBeNull();
+
+      // Clear the trap enemies
+      engine.clearAll();
+      expect(engine.getAliveCount()).toBe(0);
+
+      // Door exit is unlocked again
+      const unblockedExit = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
+      expect(unblockedExit?.type).toBe('STAGE_CLEARED');
+    });
+
+    it('spawns enemies from POWERUP_REVEALED exact tile coordinates when powerup is hit', () => {
+      const engine = createEnemiesEngine();
+      const pTx = 7;
+      const pTy = 3;
+
+      const spawned = engine.spawnFromTile(pTx, pTy, 4, 'PONTAN');
+      expect(spawned).toHaveLength(4);
+      expect(spawned.every((e) => e.x === pTx * 16.0 && e.y === pTy * 16.0)).toBe(true);
+      expect(spawned.every((e) => e.type === 'PONTAN')).toBe(true);
     });
   });
 

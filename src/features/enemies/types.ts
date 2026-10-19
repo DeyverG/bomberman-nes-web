@@ -133,6 +133,11 @@ export interface IEnemiesEngine {
   readonly aliveCount: number;
 
   /**
+   * Returns the count of living enemies remaining on the stage.
+   */
+  getAliveCount(): number;
+
+  /**
    * Spawns a single enemy on a qualified tile outside the safe spawn zone.
    * Returns null if tile is within exclusion zone or obstructed.
    */
@@ -163,6 +168,28 @@ export interface IEnemiesEngine {
   spawnPunishmentWave(
     grid: IStageGridEngine,
     player: IBombermanEntity,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns a massive horde of 12 PONTAN enemies when TIME reaches 0:00,
+   * appearing at valid tiles with Manhattan distance >= 5 from Bomberman's position.
+   */
+  spawnTimeOutHorde(
+    grid: IStageGridEngine,
+    playerPos: { x: number; y: number } | IBombermanEntity,
+    rng?: () => number
+  ): readonly EnemyEntity[];
+
+  /**
+   * Spawns a group of 4 to 8 enemies (ONEAL, MINVO, PONTAN) from the exact coordinates of a tile
+   * (e.g. when an active flame strikes DOOR_REVEALED or POWERUP_REVEALED).
+   */
+  spawnFromTile(
+    doorTx: number,
+    doorTy: number,
+    count?: number,
+    type?: EnemyType,
     rng?: () => number
   ): readonly EnemyEntity[];
 

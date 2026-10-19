@@ -51,6 +51,10 @@ export class EnemiesEngine implements IEnemiesEngine {
     return count;
   }
 
+  public getAliveCount(): number {
+    return this.aliveCount;
+  }
+
   public clearAll(): void {
     this._enemies = [];
     this.explosionKills.clear();
@@ -230,6 +234,110 @@ export class EnemiesEngine implements IEnemiesEngine {
       if (pontan) {
         spawned.push(pontan);
       }
+    }
+
+    return spawned;
+  }
+
+  public spawnTimeOutHorde(
+    grid: IStageGridEngine,
+    playerPos: { x: number; y: number } | IBombermanEntity,
+    rng: () => number = Math.random
+  ): readonly EnemyEntity[] {
+    let pTileX = 1;
+    let pTileY = 1;
+    if ('centerTile' in playerPos) {
+      pTileX = playerPos.centerTile.x;
+      pTileY = playerPos.centerTile.y;
+    } else if ('x' in playerPos && 'y' in playerPos) {
+      pTileX = playerPos.x > 31 ? Math.floor(playerPos.x / 16) : Math.floor(playerPos.x);
+      pTileY = playerPos.y > 13 ? Math.floor(playerPos.y / 16) : Math.floor(playerPos.y);
+    }
+
+    // Collect all non-hard-wall interior tiles respecting Manhattan distance >= 5
+    // Including revealed door, powerups, edges, empty ground, and soft blocks
+    const candidates: { x: number; y: number }[] = [];
+    for (let y = 1; y < 12; y++) {
+      for (let x = 1; x < 30; x++) {
+        const dist = Math.abs(x - pTileX) + Math.abs(y - pTileY);
+        if (dist >= 5) {
+          const tile = grid.getTile(x, y);
+          if (tile !== TileType.HARD_WALL) {
+            candidates.push({ x, y });
+          }
+        }
+      }
+    }
+
+    // Shuffle candidate tiles
+    for (let i = candidates.length - 1; i > 0; i--) {
+      const j = Math.floor(rng() * (i + 1));
+      const temp = candidates[i];
+      candidates[i] = candidates[j];
+      candidates[j] = temp;
+    }
+
+    const spawned: EnemyEntity[] = [];
+    const directions: EnemyDirection[] = ['RIGHT', 'UP', 'LEFT', 'DOWN'];
+    const targetCount = 12;
+
+    for (let i = 0; i < targetCount; i++) {
+      if (candidates.length === 0) break;
+      const coord = candidates[i % candidates.length];
+      const dir = directions[i % directions.length];
+
+      const pontan: EnemyEntity = {
+        id: ++this.enemyIdCounter,
+        type: 'PONTAN',
+        x: coord.x * 16.0,
+        y: coord.y * 16.0,
+        direction: dir,
+        state: 'ALIVE',
+        speed: ENEMY_BASE_SPEEDS.PONTAN,
+        hasWallpass: true,
+        baseScore: ENEMY_BASE_SCORES.PONTAN,
+        deathTimerMs: 0,
+      };
+
+      this._enemies.push(pontan);
+      spawned.push(pontan);
+    }
+
+    return spawned;
+  }
+
+  public spawnFromTile(
+    doorTx: number,
+    doorTy: number,
+    count?: number,
+    type?: EnemyType,
+    rng: () => number = Math.random
+  ): readonly EnemyEntity[] {
+    const defaultTypes: EnemyType[] = ['ONEAL', 'MINVO', 'PONTAN'];
+    // 4 to 8 enemies if count is not specified
+    const numToSpawn = count ?? (Math.floor(rng() * 5) + 4);
+    const directions: EnemyDirection[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+
+    const spawned: EnemyEntity[] = [];
+    for (let i = 0; i < numToSpawn; i++) {
+      const enemyType = type ?? defaultTypes[Math.floor(rng() * defaultTypes.length)];
+      const dir = directions[i % directions.length];
+
+      const enemy: EnemyEntity = {
+        id: ++this.enemyIdCounter,
+        type: enemyType,
+        x: doorTx * 16.0,
+        y: doorTy * 16.0,
+        direction: dir,
+        state: 'ALIVE',
+        speed: ENEMY_BASE_SPEEDS[enemyType],
+        hasWallpass: ENEMY_WALLPASS_CAPABILITIES[enemyType],
+        baseScore: ENEMY_BASE_SCORES[enemyType],
+        deathTimerMs: 0,
+      };
+
+      this._enemies.push(enemy);
+      spawned.push(enemy);
     }
 
     return spawned;

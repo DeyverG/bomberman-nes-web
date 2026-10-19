@@ -37,6 +37,10 @@ function createMockAudioContext(state: AudioContextState = 'suspended') {
       setValueAtTime: vi.fn(),
       exponentialRampToValueAtTime: vi.fn(),
     },
+    Q: {
+      value: 1,
+      setValueAtTime: vi.fn(),
+    },
     connect: vi.fn(),
   };
 
@@ -187,23 +191,42 @@ describe('8-Bit Synthesized Audio Subsystem (Unit Test Verification)', () => {
       expect(mockOscillatorNode.stop).toHaveBeenCalledWith(mockCtx.currentTime + 0.09);
     });
 
-    it('playExplosion() generates procedural white noise buffer and 900Hz->80Hz lowpass filter', () => {
-      const { mockCtx, mockFilterNode, mockBufferSourceNode } = createMockAudioContext();
+    it('playExplosion() generates dual-layer explosion (crunch noise + sub-bass punch)', () => {
+      const { mockCtx, mockFilterNode, mockBufferSourceNode, mockOscillatorNode, mockGainNode } =
+        createMockAudioContext();
       const audio = new AudioEngine({ contextFactory: () => mockCtx });
 
       audio.playExplosion();
 
+      // Capa 1: Ruido crunchy + Lowpass 3500Hz -> 140Hz con Q=3.5
       expect(mockCtx.createBuffer).toHaveBeenCalled();
       expect(mockCtx.createBufferSource).toHaveBeenCalled();
       expect(mockCtx.createBiquadFilter).toHaveBeenCalled();
       expect(mockFilterNode.type).toBe('lowpass');
-      expect(mockFilterNode.frequency.setValueAtTime).toHaveBeenCalledWith(900, mockCtx.currentTime);
+      expect(mockFilterNode.Q.value).toBe(3.5);
+      expect(mockFilterNode.frequency.setValueAtTime).toHaveBeenCalledWith(3500, mockCtx.currentTime);
       expect(mockFilterNode.frequency.exponentialRampToValueAtTime).toHaveBeenCalledWith(
-        80,
+        140,
         mockCtx.currentTime + 0.48
       );
       expect(mockBufferSourceNode.start).toHaveBeenCalledWith(mockCtx.currentTime);
       expect(mockBufferSourceNode.stop).toHaveBeenCalledWith(mockCtx.currentTime + 0.48);
+
+      // Capa 2: Sub-Bass oscillator 160Hz -> 28Hz
+      expect(mockCtx.createOscillator).toHaveBeenCalled();
+      expect(mockOscillatorNode.type).toBe('triangle');
+      expect(mockOscillatorNode.frequency.setValueAtTime).toHaveBeenCalledWith(160, mockCtx.currentTime);
+      expect(mockOscillatorNode.frequency.exponentialRampToValueAtTime).toHaveBeenCalledWith(
+        28,
+        mockCtx.currentTime + 0.3
+      );
+      expect(mockOscillatorNode.start).toHaveBeenCalledWith(mockCtx.currentTime);
+      expect(mockOscillatorNode.stop).toHaveBeenCalledWith(mockCtx.currentTime + 0.32);
+
+      // Verifies gain envelope setup for both layers
+      expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(0.001, mockCtx.currentTime);
+      expect(mockGainNode.gain.linearRampToValueAtTime).toHaveBeenCalledWith(0.9, mockCtx.currentTime + 0.005);
+      expect(mockGainNode.gain.setValueAtTime).toHaveBeenCalledWith(0.85, mockCtx.currentTime);
     });
 
     it('playPowerup() synthesizes 4 ascending major arpeggio notes (C5, E5, G5, C6)', () => {
