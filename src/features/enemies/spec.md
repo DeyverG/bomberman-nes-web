@@ -119,6 +119,12 @@ If an enemy faces an obstacle ahead at an intersection:
 - It eliminates the blocked direction from its candidate list.
 - If all forward and perpendicular directions are blocked, it reverses direction ($180^\circ$ turn).
 
+### 4.4 Immediate Bomb Rebound (Enclosure Mechanic)
+When a bomb is newly placed in front of an enemy moving towards tile $(targetTx, targetTy)$ (even mid-tile):
+- The enemy **CANNOT enter the bomb tile**.
+- It immediately snaps to the border of its current tile and reverses direction $180^\circ$ on that exact tick.
+- This allows the player to trap enemies between two bombs or between a bomb and a wall.
+
 ---
 
 ## 5. Simultaneous Bomb Combo Kill Multipliers
@@ -155,18 +161,21 @@ When an enemy's bounding box intersects an active explosion flame segment:
 
 ## 7. Lethality Against Bomberman
 
-### 7.1 Hitbox Intersection Contract
-- **Enemy Outer Bounding Box:**
-  $$\text{Box}_{enemy} = [x, x + 16] \times [y, y + 16]$$
-- **Bomberman Inner Vulnerability Hitbox ($12\times 12$ centered):**
-  $$\text{Hitbox}_{player} = [player.x + 2, player.x + 14] \times [player.y + 2, player.y + 14]$$
+### 7.1 Hitbox Intersection Contract: Core 8x8 Hurtbox
+- **Caja Física de Terreno ($16 \times 16\text{ px}$):**
+  $[x, y, 16, 16]$ se utiliza exclusivamente para colisión física contra muros y bombas sólidas.
+- **Hurtbox Letal Centrada ($8 \times 8\text{ px}$):**
+  Tanto Bomberman como cada enemigo poseen un núcleo letal de $8\times 8\text{ px}$ centrado en su sprite:
+  $$\text{Hurtbox}_{player} = [player.x + 4, player.x + 12] \times [player.y + 4, player.y + 12]$$
+  $$\text{Hurtbox}_{enemy} = [enemy.x + 4, enemy.x + 12] \times [enemy.y + 4, enemy.y + 12]$$
 
 ### 7.2 Lethality Trigger
 An enemy kills Bomberman if and only if:
 1. `enemy.state === 'ALIVE'`.
 2. `player.state === 'ALIVE'`.
 3. `!player.isInvulnerable` (i.e. not in `SPAWNING`, not `DYING`, not `DEAD`, and `player.stats.invincibleTimerMs === 0`).
-4. $\text{AABB}(\text{Box}_{enemy}, \text{Hitbox}_{player}) \text{ is true}$.
+4. $\text{AABB}(\text{Hurtbox}_{enemy}, \text{Hurtbox}_{player}) \text{ is true}$, lo que equivale matemáticamente a:
+   $$|player.x - enemy.x| < 8 \land |player.y - enemy.y| < 8$$
 
 When all conditions are met:
 - Triggers `player.kill()`.

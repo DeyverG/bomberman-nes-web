@@ -24,6 +24,18 @@ It operates in **pure TypeScript**, completely decoupled from React and DOM rend
 - **World Boundary Clamping:**
   Playfield spans columns $1$ to $29$ ($x \in [16, 464]$) and rows $1$ to $11$ ($y \in [16, 176]$).
 
+### 2.3 Physical Collision Box vs. Lethal Hurtboxes
+- **Caja Física de Terreno ($16 \times 16\text{ px}$):**
+  $[x, y, 16, 16]$ se utiliza exclusivamente para colisionar contra paredes (`HARD_WALL`, `SOFT_BLOCK`) y bombas sólidas.
+- **Hurtbox Letal Jugador <-> Enemigo ($8 \times 8\text{ px}$ centrada):**
+  $$\text{Hurtbox}_{\text{player}} = [x + 4, y + 4, 8, 8]$$
+  Un enemigo mata a Bomberman ÚNICAMENTE si colisionan sus núcleos letales de $8 \times 8$:
+  $$|x_{\text{player}} - x_{\text{enemy}}| < 8 \land |y_{\text{player}} - y_{\text{enemy}}| < 8$$
+  Esto permite maniobrar en la casilla contigua y colocar una bomba a corta distancia sin morir por rozar bordes transparentes.
+- **Hurtbox Letal de Llamas ($10 \times 10\text{ px}$ centrada):**
+  $$\text{Hurtbox}_{\text{flame}} = [x + 3, y + 3, 10, 10]$$
+  Evita muertes injustas al asomar $2\text{px}$ el casco en la esquina de un pasillo perpendicular a una explosión.
+
 ---
 
 ## 3. Movement Physics & Speed Constants

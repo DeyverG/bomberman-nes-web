@@ -629,8 +629,8 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
     });
   });
 
-  describe('Lethality Against Bomberman', () => {
-    it('triggers player.kill() when an ALIVE enemy collides with Bomberman inner 12x12 hitbox', () => {
+  describe('Lethality Against Bomberman (8x8 Core Hurtbox)', () => {
+    it('triggers player.kill() when 8x8 centered hurtboxes intersect (|dx| < 8 && |dy| < 8)', () => {
       const engine = createEnemiesEngine();
       const grid = createStageGrid();
       const player = createBomberman();
@@ -651,6 +651,34 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
 
       const killed = engine.checkPlayerLethality(player);
       expect(killed).toBe(true);
+      expect(player.state).toBe('DYING');
+    });
+
+    it('spares player when distance is >= 8px even if 16x16 bounding boxes touch or overlap transparent edges', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, null, grid);
+
+      grid.setTile(6, 1, TileType.EMPTY);
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Player at (16.0, 16.0). Enemy at (24.0, 16.0) -> |dx| = 8.0 >= 8
+      // Outer 16x16 boxes overlap by 8px, but 8x8 core hurtboxes do NOT touch!
+      player.x = 16.0;
+      player.y = 16.0;
+      enemy.x = 24.0;
+      enemy.y = 16.0;
+
+      const killedAt8 = engine.checkPlayerLethality(player);
+      expect(killedAt8).toBe(false);
+      expect(player.state).toBe('ALIVE');
+
+      // Move 1px closer to (23.0, 16.0) -> |dx| = 7.0 < 8 -> Kills player!
+      enemy.x = 23.0;
+      const killedAt7 = engine.checkPlayerLethality(player);
+      expect(killedAt7).toBe(true);
       expect(player.state).toBe('DYING');
     });
 
@@ -691,6 +719,99 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       const killed = engine.checkPlayerLethality(player);
       expect(killed).toBe(false);
       expect(player.state).toBe('ALIVE');
+    });
+  });
+
+  describe('Immediate Bomb Rebound & Enclosure Mechanics', () => {
+    it('immediately halts and reverses direction 180 degrees when moving towards an active bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(1, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      enemy.x = 16.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Drop bomb at tile (2, 1) directly in front of enemy
+      ordinance.placeBomb(2, 1, player, grid);
+
+      engine.update(16.666, player, grid, ordinance);
+
+      // Enemy must stop at edge of tile 1 (16.0) and face LEFT
+      expect(enemy.x).toBe(16.0);
+      expect(enemy.direction).toBe('LEFT');
+    });
+
+    it('reverses mid-tile without penetrating into the bomb tile when a bomb is planted', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(1, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.EMPTY);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Enemy has started crossing from tile 1 to tile 2 (x = 20.0) moving RIGHT
+      enemy.x = 20.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      ordinance.placeBomb(2, 1, player, grid);
+
+      engine.update(16.666, player, grid, ordinance);
+
+      // Must snap back to border of tile 1 (16.0) and reverse to LEFT
+      expect(enemy.x).toBe(16.0);
+      expect(enemy.direction).toBe('LEFT');
+    });
+
+    it('supports trapping enemies between two bombs or between a wall and a bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(2, 1, TileType.EMPTY);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(4, 1, TileType.EMPTY);
+      player.stats.maxBombs = 5;
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) -> (48.0, 16.0)
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Bomb on the right (4, 1) and bomb on the left (2, 1)
+      const bRight = ordinance.placeBomb(4, 1, player, grid);
+      const bLeft = ordinance.placeBomb(2, 1, player, grid);
+      expect(bRight).not.toBeNull();
+      expect(bLeft).not.toBeNull();
+
+      // Tick 1: moving RIGHT towards bomb at (4, 1) -> rebounds to edge (48.0) and flips to LEFT
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.direction).toBe('LEFT');
+
+      // Tick 2: moving LEFT towards bomb at (2, 1) -> rebounds to edge (48.0) and flips to RIGHT
+      engine.update(16.666, player, grid, ordinance);
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.direction).toBe('RIGHT');
+
+      // Trapped: never penetrates either bomb tile
+      expect(enemy.x).toBe(48.0);
     });
   });
 });

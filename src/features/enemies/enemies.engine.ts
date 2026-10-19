@@ -464,6 +464,41 @@ export class EnemiesEngine implements IEnemiesEngine {
     grid: IStageGridEngine,
     ordinance: IOrdinanceEngine
   ): void {
+    // Immediate 180° rebound when moving towards an active bomb (trapping mechanic)
+    if (enemy.direction === 'RIGHT') {
+      const targetTx = Math.floor(enemy.x / 16) + 1;
+      const targetTy = Math.round(enemy.y / 16);
+      if (ordinance.isBombAt(targetTx, targetTy)) {
+        enemy.x = Math.floor(enemy.x / 16) * 16.0;
+        enemy.direction = 'LEFT';
+        return;
+      }
+    } else if (enemy.direction === 'LEFT') {
+      const targetTx = Math.ceil(enemy.x / 16) - 1;
+      const targetTy = Math.round(enemy.y / 16);
+      if (ordinance.isBombAt(targetTx, targetTy)) {
+        enemy.x = Math.ceil(enemy.x / 16) * 16.0;
+        enemy.direction = 'RIGHT';
+        return;
+      }
+    } else if (enemy.direction === 'DOWN') {
+      const targetTx = Math.round(enemy.x / 16);
+      const targetTy = Math.floor(enemy.y / 16) + 1;
+      if (ordinance.isBombAt(targetTx, targetTy)) {
+        enemy.y = Math.floor(enemy.y / 16) * 16.0;
+        enemy.direction = 'UP';
+        return;
+      }
+    } else if (enemy.direction === 'UP') {
+      const targetTx = Math.round(enemy.x / 16);
+      const targetTy = Math.ceil(enemy.y / 16) - 1;
+      if (ordinance.isBombAt(targetTx, targetTy)) {
+        enemy.y = Math.ceil(enemy.y / 16) * 16.0;
+        enemy.direction = 'DOWN';
+        return;
+      }
+    }
+
     const rx = ((enemy.x % 16) + 16) % 16;
     const ry = ((enemy.y % 16) + 16) % 16;
     const isAtIntersection =
@@ -716,21 +751,14 @@ export class EnemiesEngine implements IEnemiesEngine {
       return false;
     }
 
-    // Player inner vulnerability hitbox (12x12 centered at [x+2, y+2])
-    const pMinX = player.x + 2;
-    const pMaxX = player.x + 14;
-    const pMinY = player.y + 2;
-    const pMaxY = player.y + 14;
-
+    // Both Bomberman and enemies have an 8x8px lethal core hurtbox centered at [pos + 4]
+    // Collision condition: Math.abs(player.x - enemy.x) < 8 && Math.abs(player.y - enemy.y) < 8
     for (const enemy of this._enemies) {
       if (enemy.state !== 'ALIVE') continue;
 
-      // Enemy outer bounding box (16x16)
       if (
-        enemy.x < pMaxX &&
-        enemy.x + 16 > pMinX &&
-        enemy.y < pMaxY &&
-        enemy.y + 16 > pMinY
+        Math.abs(player.x - enemy.x) < 8 &&
+        Math.abs(player.y - enemy.y) < 8
       ) {
         player.kill();
         return true;

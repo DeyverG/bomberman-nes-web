@@ -269,11 +269,11 @@ export class OrdinanceEngine implements IOrdinanceEngine {
 
     // 4. Flame Lethality against Bomberman
     if (!player.stats.flamepass && player.state === 'ALIVE') {
-      // Inner damage hitbox: 12x12px centered inside 16x16px
-      const dmgMinX = player.x + 2;
-      const dmgMinY = player.y + 2;
-      const dmgMaxX = player.x + 14;
-      const dmgMaxY = player.y + 14;
+      // Authentic NES flame hurtbox: 10x10px centered inside 16x16px at [x+3, y+3]
+      const dmgMinX = player.x + 3;
+      const dmgMinY = player.y + 3;
+      const dmgMaxX = player.x + 13;
+      const dmgMaxY = player.y + 13;
 
       for (const explosion of this._activeExplosions) {
         for (const segment of explosion.segments) {

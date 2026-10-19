@@ -1,3 +1,4 @@
+import { drawNesSprite } from '../../shared/sprites/nes-sprites';
 import { HUD_OFFSET_Y } from '../stage-grid/types';
 import type { EnemyEntity, IEnemiesEngine } from './types';
 
@@ -8,8 +9,8 @@ export interface EnemiesRenderOptions {
 
 /**
  * Pure 2D Canvas Renderer for NES Bomberman Enemies.
- * Renders authentic pixel art sprites for all 7 enemies, 600ms death animations,
- * and floating score rewards.
+ * Renders authentic 16x16 pixel-art sprites for all 8 enemies with 2-frame walking
+ * oscillations, dying desintegration frames, and floating score rewards.
  */
 export class EnemiesRenderer {
   private readonly ctx: CanvasRenderingContext2D;
@@ -42,9 +43,13 @@ export class EnemiesRenderer {
 
       // Hitbox outline strictly for debugging (activated via F2)
       if (debugHitboxes) {
+        // Physical 16x16 collision box
         ctx.strokeStyle = '#00ffff';
         ctx.lineWidth = 1;
         ctx.strokeRect(screenX, screenY, 16, 16);
+        // Lethal 8x8 core hurtbox
+        ctx.strokeStyle = '#ff0000';
+        ctx.strokeRect(screenX + 4, screenY + 4, 8, 8);
       }
 
       ctx.restore();
@@ -52,249 +57,10 @@ export class EnemiesRenderer {
   }
 
   private drawAlive(x: number, y: number, enemy: EnemyEntity): void {
-    switch (enemy.type) {
-      case 'BALLOM':
-        this.drawBallom(x, y);
-        break;
-      case 'ONEAL':
-        this.drawOneal(x, y, enemy.speed > 0.5);
-        break;
-      case 'DAHL':
-        this.drawDahl(x, y);
-        break;
-      case 'MINVO':
-        this.drawMinvo(x, y);
-        break;
-      case 'OVAPE':
-        this.drawOvape(x, y);
-        break;
-      case 'KONDORIA':
-        this.drawKondoria(x, y);
-        break;
-      case 'PASS':
-        this.drawPass(x, y);
-        break;
-      case 'PONTAN':
-        this.drawPontan(x, y);
-        break;
-    }
-  }
-
-  /**
-   * BALLOM: Orange balloon with smiling face
-   */
-  private drawBallom(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Body
-    ctx.fillStyle = '#fc9838';
-    ctx.fillRect(x + 3, y + 2, 10, 11);
-    ctx.fillRect(x + 2, y + 4, 12, 7);
-
-    // Highlight
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 4, y + 3, 3, 2);
-
-    // Eyes
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 6, 2, 2);
-    ctx.fillRect(x + 9, y + 6, 2, 2);
-
-    // Smile
-    ctx.fillRect(x + 6, y + 9, 4, 1);
-    ctx.fillRect(x + 5, y + 8, 1, 1);
-    ctx.fillRect(x + 10, y + 8, 1, 1);
-
-    // Bottom knot
-    ctx.fillStyle = '#d85000';
-    ctx.fillRect(x + 7, y + 13, 2, 2);
-  }
-
-  /**
-   * ONEAL: Blue ghost/onion with big eyes
-   */
-  private drawOneal(x: number, y: number, isBursting: boolean): void {
-    const ctx = this.ctx;
-
-    // Onion body
-    ctx.fillStyle = isBursting ? '#f83800' : '#0058f8';
-    ctx.fillRect(x + 7, y + 1, 2, 3); // top sprout
-    ctx.fillRect(x + 4, y + 4, 8, 9);
-    ctx.fillRect(x + 2, y + 6, 12, 6);
-
-    // Big white eyes
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 4, y + 6, 3, 4);
-    ctx.fillRect(x + 9, y + 6, 3, 4);
-
-    // Black pupils
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 7, 2, 2);
-    ctx.fillRect(x + 10, y + 7, 2, 2);
-
-    // Bottom wavy feet
-    ctx.fillStyle = isBursting ? '#d85000' : '#0000a8';
-    ctx.fillRect(x + 3, y + 13, 3, 2);
-    ctx.fillRect(x + 10, y + 13, 3, 2);
-  }
-
-  /**
-   * DAHL: Red spinning barrel / cylinder
-   */
-  private drawDahl(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Barrel red body
-    ctx.fillStyle = '#f83800';
-    ctx.fillRect(x + 3, y + 2, 10, 12);
-    ctx.fillRect(x + 2, y + 4, 12, 8);
-
-    // Yellow / white stripes
-    ctx.fillStyle = '#fc9838';
-    ctx.fillRect(x + 2, y + 5, 12, 2);
-    ctx.fillRect(x + 2, y + 9, 12, 2);
-
-    // Slits
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 5, y + 7, 2, 1);
-    ctx.fillRect(x + 9, y + 7, 2, 1);
-  }
-
-  /**
-   * MINVO: Green aggressive chaser face
-   */
-  private drawMinvo(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Green round face
-    ctx.fillStyle = '#00a800';
-    ctx.fillRect(x + 3, y + 2, 10, 12);
-    ctx.fillRect(x + 2, y + 4, 12, 8);
-
-    // Angled eyes
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 4, y + 5, 3, 3);
-    ctx.fillRect(x + 9, y + 5, 3, 3);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 6, 2, 2);
-    ctx.fillRect(x + 9, y + 6, 2, 2);
-
-    // Grin with teeth
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 5, y + 10, 6, 2);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 7, y + 10, 2, 2);
-  }
-
-  /**
-   * OVAPE: Purple soft block ghost
-   */
-  private drawOvape(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Purple ghost shape
-    ctx.fillStyle = '#9838f8';
-    ctx.fillRect(x + 4, y + 2, 8, 12);
-    ctx.fillRect(x + 2, y + 5, 12, 7);
-
-    // Eyes
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 5, y + 6, 2, 3);
-    ctx.fillRect(x + 9, y + 6, 2, 3);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 7, 1, 2);
-    ctx.fillRect(x + 9, y + 7, 1, 2);
-
-    // Ghostly frills
-    ctx.fillStyle = '#fcb088';
-    ctx.fillRect(x + 3, y + 13, 2, 2);
-    ctx.fillRect(x + 7, y + 13, 2, 2);
-    ctx.fillRect(x + 11, y + 13, 2, 2);
-  }
-
-  /**
-   * KONDORIA: Blue blob / amoeba
-   */
-  private drawKondoria(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Amoeba body
-    ctx.fillStyle = '#3cbcfc';
-    ctx.fillRect(x + 3, y + 3, 10, 10);
-    ctx.fillRect(x + 1, y + 6, 14, 5);
-
-    // Core
-    ctx.fillStyle = '#0058f8';
-    ctx.fillRect(x + 5, y + 5, 6, 6);
-
-    // White eyes
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 6, y + 6, 2, 2);
-    ctx.fillRect(x + 9, y + 6, 2, 2);
-  }
-
-  /**
-   * PONTAN: Orange/yellow spinning sun disc
-   */
-  private drawPontan(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Disc body
-    ctx.fillStyle = '#f8b800';
-    ctx.fillRect(x + 3, y + 3, 10, 10);
-    ctx.fillRect(x + 2, y + 5, 12, 6);
-
-    // Radial flares
-    ctx.fillStyle = '#f83800';
-    ctx.fillRect(x + 7, y + 1, 2, 2);
-    ctx.fillRect(x + 7, y + 13, 2, 2);
-    ctx.fillRect(x + 1, y + 7, 2, 2);
-    ctx.fillRect(x + 13, y + 7, 2, 2);
-
-    // Center face
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 6, 2, 2);
-    ctx.fillRect(x + 9, y + 6, 2, 2);
-    ctx.fillRect(x + 6, y + 9, 4, 1);
-  }
-
-  /**
-   * PASS: Fast orange/yellow aggressive lion face
-   */
-  private drawPass(x: number, y: number): void {
-    const ctx = this.ctx;
-
-    // Mane (orange lion mane)
-    ctx.fillStyle = '#f83800';
-    ctx.fillRect(x + 2, y + 2, 12, 12);
-    ctx.fillRect(x + 1, y + 4, 14, 8);
-
-    // Ear tufts
-    ctx.fillStyle = '#fcb088';
-    ctx.fillRect(x + 2, y + 1, 3, 2);
-    ctx.fillRect(x + 11, y + 1, 3, 2);
-
-    // Inner face (bright yellow)
-    ctx.fillStyle = '#f8b800';
-    ctx.fillRect(x + 4, y + 4, 8, 8);
-    ctx.fillRect(x + 3, y + 6, 10, 4);
-
-    // Eyes (white with black pupils)
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 4, y + 6, 3, 2);
-    ctx.fillRect(x + 9, y + 6, 3, 2);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 5, y + 6, 2, 2);
-    ctx.fillRect(x + 9, y + 6, 2, 2);
-
-    // Snout / Nose / Whiskers
-    ctx.fillStyle = '#fcb088';
-    ctx.fillRect(x + 6, y + 8, 4, 3);
-    ctx.fillStyle = '#000000';
-    ctx.fillRect(x + 7, y + 8, 2, 1); // nose
-    ctx.fillRect(x + 6, y + 10, 4, 1); // mouth/teeth
-    ctx.fillRect(x + 2, y + 9, 2, 1); // left whisker
-    ctx.fillRect(x + 12, y + 9, 2, 1); // right whisker
+    // 2-frame walking oscillation (alternates every 150ms)
+    const frame = (Math.floor(performance.now() / 150) % 2) + 1;
+    const spriteName = `${enemy.type}_${frame}`;
+    drawNesSprite(this.ctx, spriteName, x, y);
   }
 
   /**
@@ -304,20 +70,8 @@ export class EnemiesRenderer {
     const ctx = this.ctx;
     const progress = Math.min(1.0, enemy.deathTimerMs / 600);
 
-    // 1. Disintegrating crumbling sprite
-    const colors = ['#f83800', '#fc9838', '#ffffff', '#7c0800'];
-    const color = colors[Math.floor(enemy.deathTimerMs / 75) % colors.length];
-
-    ctx.fillStyle = color;
-    const shrink = Math.floor(progress * 5);
-    const size = Math.max(4, 14 - shrink * 2);
-    const offset = Math.floor((16 - size) / 2);
-    ctx.fillRect(x + offset, y + offset, size, size);
-
-    // Sparks
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(x + 2 + Math.floor(progress * 4), y + 2, 2, 2);
-    ctx.fillRect(x + 12 - Math.floor(progress * 4), y + 12, 2, 2);
+    // 1. Draw dying pixel-art frame
+    drawNesSprite(ctx, `${enemy.type}_DYING`, x, y);
 
     // 2. Floating Points Reward Popup
     if (enemy.scoreAwarded) {

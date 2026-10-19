@@ -323,5 +323,30 @@ describe('Ordinance & Explosion System (Unit Test Verification)', () => {
       ordinance.update(16.666, player, grid);
       expect(player.state).toBe('ALIVE');
     });
+
+    it('spares Bomberman when only 2px of outer sprite overlaps a perpendicular flame (10x10 centered hurtbox)', () => {
+      const ordinance = new OrdinanceEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      player.update(500, null, grid);
+
+      // Block downward propagation with soft block at (1, 2)
+      grid.setTile(1, 2, TileType.SOFT_BLOCK);
+
+      // Bomb at (1, 1) -> flame covers [16, 32] x [16, 32]
+      ordinance.placeBomb(1, 1, player, grid);
+      ordinance.detonateOldestBomb(grid, player);
+
+      // Player below flame at (16.0, 30.0). Outer box overlaps y in [30, 32] (2px), but 10x10 hurtbox is [33, 43] > 32
+      player.x = 16.0;
+      player.y = 30.0;
+      ordinance.update(16.666, player, grid);
+      expect(player.state).toBe('ALIVE');
+
+      // Move into lethal range at (16.0, 28.0): hurtbox y min = 31 < 32 -> kills Bomberman
+      player.y = 28.0;
+      ordinance.update(16.666, player, grid);
+      expect(player.state).toBe('DYING');
+    });
   });
 });
