@@ -32,6 +32,7 @@ export const ENEMY_SIZE = 16;
 export const ENEMY_DEATH_DURATION_MS = 600;
 export const SPAWN_EXCLUSION_MANHATTAN_DISTANCE = 5;
 export const STAGE_SPAWN_INITIAL_MIN_DISTANCE = 8;
+export const MAX_ACTIVE_ENEMIES = 10;
 
 /**
  * Official NES Bomberman Base Scores per Enemy
@@ -106,6 +107,8 @@ export interface EnemyEntity {
   spawnImmunityMs: number;
   tilesWalkedInCurrentDir: number;
   reversalQuota: number;
+  lastDecisionTx?: number;
+  lastDecisionTy?: number;
 }
 
 /**
@@ -127,6 +130,8 @@ export interface EnemySnapshot {
   readonly spawnImmunityMs: number;
   readonly tilesWalkedInCurrentDir: number;
   readonly reversalQuota: number;
+  readonly lastDecisionTx?: number;
+  readonly lastDecisionTy?: number;
 }
 
 /**
@@ -188,6 +193,18 @@ export interface IEnemiesEngine {
   ): void;
 
   /**
+   * Evaluates available cardinal directions and updates enemy direction.
+   * If all directions are impassable (validDirs.length === 0), enters Trapped State.
+   */
+  chooseNextDirection(
+    enemy: EnemyEntity,
+    playerTile: { x: number; y: number },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine,
+    rng?: () => number
+  ): void;
+
+  /**
    * Checks unblocked straight line of sight between an enemy and a target tile within 8 tiles.
    */
   hasLineOfSight(
@@ -204,6 +221,17 @@ export interface IEnemiesEngine {
    * Checks whether a tile is passable for an enemy entity.
    */
   canEnemyPassTile(
+    tx: number,
+    ty: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean;
+
+  /**
+   * Checks whether a tile is passable for an enemy entity (alias for canEnemyPassTile).
+   */
+  canEnemyEnterTile(
     tx: number,
     ty: number,
     enemy: { hasWallpass: boolean },
@@ -235,8 +263,8 @@ export interface IEnemiesEngine {
   ): readonly EnemyEntity[];
 
   /**
-   * Spawns a massive horde of 12 PONTAN enemies when TIME reaches 0:00,
-   * appearing at valid tiles with Manhattan distance >= 5 from Bomberman's position.
+   * Spawns a horde of PONTAN enemies filling available memory slots up to MAX_ACTIVE_ENEMIES (10)
+   * when TIME reaches 0:00, appearing at valid tiles with Manhattan distance >= 5 from Bomberman's position.
    */
   spawnTimeOutHorde(
     grid: IStageGridEngine,
@@ -245,8 +273,9 @@ export interface IEnemiesEngine {
   ): readonly EnemyEntity[];
 
   /**
-   * Spawns a group of 4 to 8 enemies (ONEAL, MINVO, PONTAN) from the exact coordinates of a tile
-   * (e.g. when an active flame strikes DOOR_REVEALED or POWERUP_REVEALED).
+   * Spawns a group of enemies (scaled by stage) from the exact coordinates of a tile
+   * (e.g. when an active flame strikes DOOR_REVEALED or POWERUP_REVEALED),
+   * limited by current living enemies and capped so total alive count does not exceed 8.
    */
   spawnFromTile(
     doorTx: number,

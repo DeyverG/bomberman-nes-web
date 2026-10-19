@@ -12,6 +12,7 @@ import {
   ENEMY_SIZE,
   ENEMY_WALLPASS_CAPABILITIES,
   EnemyType,
+  MAX_ACTIVE_ENEMIES,
   SPAWN_EXCLUSION_MANHATTAN_DISTANCE,
   STAGE_SPAWN_INITIAL_MIN_DISTANCE,
 } from './types';
@@ -72,6 +73,7 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(ENEMY_SIZE).toBe(16);
       expect(SPAWN_EXCLUSION_MANHATTAN_DISTANCE).toBe(5);
       expect(STAGE_SPAWN_INITIAL_MIN_DISTANCE).toBe(8);
+      expect(MAX_ACTIVE_ENEMIES).toBe(10);
     });
   });
 
@@ -357,7 +359,7 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
   });
 
   describe('Canonical NES TIME = 0:00 Pontan Horde & Farming (spawnTimeOutHorde)', () => {
-    it('spawns exactly 12 PONTAN enemies with speed 1.125, wallpass true, and 8000 base points', () => {
+    it('spawns exactly 10 PONTAN enemies filling available slots up to MAX_ACTIVE_ENEMIES (10) with speed 1.125, wallpass true, and 8000 base points', () => {
       const engine = createEnemiesEngine();
       const grid = createStageGrid();
       const player = createBomberman();
@@ -365,8 +367,8 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       player.y = 16.0;
 
       const horde = engine.spawnTimeOutHorde(grid, player);
-      expect(horde).toHaveLength(12);
-      expect(engine.getAliveCount()).toBe(12);
+      expect(horde).toHaveLength(10);
+      expect(engine.getAliveCount()).toBe(10);
       expect(horde.every((e) => e.type === 'PONTAN')).toBe(true);
       expect(horde.every((e) => e.speed === 1.125)).toBe(true);
       expect(horde.every((e) => e.hasWallpass === true)).toBe(true);
@@ -374,7 +376,7 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(horde.every((e) => e.state === 'ALIVE')).toBe(true);
     });
 
-    it('spawns all 12 Pontans respecting Manhattan distance >= 5 from current Bomberman position', () => {
+    it('spawns all 10 Pontans respecting Manhattan distance >= 5 from current Bomberman position', () => {
       const engine = createEnemiesEngine();
       const grid = createStageGrid();
       const player = createBomberman();
@@ -384,7 +386,7 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       player.y = 80.0;
 
       const horde = engine.spawnTimeOutHorde(grid, player);
-      expect(horde).toHaveLength(12);
+      expect(horde).toHaveLength(10);
 
       for (const enemy of horde) {
         const enemyTx = Math.round(enemy.x / 16.0);
@@ -392,6 +394,33 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
         const dist = Math.abs(enemyTx - 10) + Math.abs(enemyTy - 5);
         expect(dist).toBeGreaterThanOrEqual(5);
       }
+    });
+
+    it('fills available slots with PONTAN up to exactly MAX_ACTIVE_ENEMIES = 10 without exceeding limit', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+
+      // Pre-spawn 4 enemies outside safe zone
+      grid.setTile(6, 1, TileType.EMPTY);
+      grid.setTile(7, 1, TileType.EMPTY);
+      grid.setTile(8, 1, TileType.EMPTY);
+      grid.setTile(9, 1, TileType.EMPTY);
+      engine.spawnEnemy('BALLOM', 6, 1, grid);
+      engine.spawnEnemy('BALLOM', 7, 1, grid);
+      engine.spawnEnemy('BALLOM', 8, 1, grid);
+      engine.spawnEnemy('BALLOM', 9, 1, grid);
+      expect(engine.getAliveCount()).toBe(4);
+
+      // TIME = 0:00 triggers: fills remaining 10 - 4 = 6 slots
+      const horde = engine.spawnTimeOutHorde(grid, player);
+      expect(horde).toHaveLength(6);
+      expect(engine.getAliveCount()).toBe(10);
+
+      // Triggering again when 10 are already alive spawns 0
+      const extraHorde = engine.spawnTimeOutHorde(grid, player);
+      expect(extraHorde).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(10);
     });
 
     it('does NOT automatically kill Bomberman when TIME reaches 0:00 and spawnTimeOutHorde is triggered', () => {
@@ -407,7 +436,7 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
 
       // Bomberman is still alive, clock hit 0:00 without killing the player
       expect(player.state).toBe('ALIVE');
-      expect(engine.getAliveCount()).toBe(12);
+      expect(engine.getAliveCount()).toBe(10);
     });
 
     it('allows player to farm Pontans for 8000 points base + combos and clear stage once count hits 0', () => {
@@ -424,13 +453,13 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
 
       // Spawn timeout horde
       engine.spawnTimeOutHorde(grid, player);
-      expect(engine.getAliveCount()).toBe(12);
+      expect(engine.getAliveCount()).toBe(10);
 
       // Door coordinates from grid
       const doorCoord = grid.indexToCoord(grid.doorIndex);
       grid.setTile(doorCoord.x, doorCoord.y, TileType.DOOR_REVEALED);
 
-      // While 12 Pontans are alive, attempting door entry does NOT clear stage
+      // While 10 Pontans are alive, attempting door entry does NOT clear stage
       player.x = doorCoord.x * 16.0;
       player.y = doorCoord.y * 16.0;
       const blockedDoorResult = powerups.checkDoorEntry(player, grid, engine.getAliveCount());
@@ -471,15 +500,15 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
   });
 
   describe('Door & Power-Up Trap Spawns (spawnFromTile)', () => {
-    it('spawns a group of 4 to 8 enemies originating at the exact tile coordinates of the door', () => {
+    it('with 0 enemies alive, bombing door or powerup generates exactly 8 enemies originating at tile coordinates', () => {
       const engine = createEnemiesEngine();
       const doorTx = 14;
       const doorTy = 5;
 
+      expect(engine.getAliveCount()).toBe(0);
       const spawned = engine.spawnFromTile(doorTx, doorTy);
-      expect(spawned.length).toBeGreaterThanOrEqual(4);
-      expect(spawned.length).toBeLessThanOrEqual(8);
-      expect(engine.getAliveCount()).toBe(spawned.length);
+      expect(spawned).toHaveLength(8);
+      expect(engine.getAliveCount()).toBe(8);
 
       // Verifies exact tile coordinates (x = tx * 16, y = ty * 16)
       expect(spawned.every((e) => e.x === doorTx * 16.0 && e.y === doorTy * 16.0)).toBe(true);
@@ -488,6 +517,73 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       const allowedTypes: EnemyType[] = ['ONEAL', 'MINVO', 'PONTAN'];
       expect(spawned.every((e) => allowedTypes.includes(e.type))).toBe(true);
       expect(spawned.every((e) => e.state === 'ALIVE')).toBe(true);
+    });
+
+    it('with 5 enemies alive, bombing door or powerup spawns exactly 3 enemies (total 8 in map)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 5 enemies outside safe zone
+      for (let x = 6; x <= 10; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(5);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(3);
+      expect(engine.getAliveCount()).toBe(8);
+    });
+
+    it('with 6 enemies alive, bombing powerup generates only 2 enemies without exceeding limit of 8 (or MAX_ACTIVE_ENEMIES = 10)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 6 enemies
+      for (let x = 6; x <= 11; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(6);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(2);
+      expect(engine.getAliveCount()).toBe(8);
+      expect(engine.getAliveCount()).toBeLessThanOrEqual(MAX_ACTIVE_ENEMIES);
+    });
+
+    it('with 8 or more enemies alive, bombing door or powerup generates 0 new enemies', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 8 enemies
+      for (let x = 6; x <= 13; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(8);
+
+      const spawned = engine.spawnFromTile(14, 5);
+      expect(spawned).toHaveLength(0);
+      expect(engine.getAliveCount()).toBe(8);
+    });
+
+    it('spawnEnemy() rejects spawning when MAX_ACTIVE_ENEMIES = 10 limit is reached', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+
+      // Pre-spawn 10 enemies
+      for (let x = 6; x <= 15; x++) {
+        grid.setTile(x, 1, TileType.EMPTY);
+        engine.spawnEnemy('BALLOM', x, 1, grid);
+      }
+      expect(engine.getAliveCount()).toBe(10);
+
+      // 11th spawn must be rejected
+      grid.setTile(16, 1, TileType.EMPTY);
+      const eleventh = engine.spawnEnemy('BALLOM', 16, 1, grid);
+      expect(eleventh).toBeNull();
+      expect(engine.getAliveCount()).toBe(10);
     });
 
     it('disperses enemies across available cardinal directions upon spawning', () => {
@@ -580,17 +676,20 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
       expect(wave1.every((e) => e.type === 'ONEAL')).toBe(true);
       expect(wave1.every((e) => e.x === 10 * 16.0 && e.y === 5 * 16.0)).toBe(true);
 
-      // Stage 3 trap: 8 MINVO
+      // Stage 3 trap: 8 MINVO (cleared first so slots are free)
+      engine.clearAll();
       const wave3 = engine.spawnTrapWave(3, 12, 6);
       expect(wave3).toHaveLength(8);
       expect(wave3.every((e) => e.type === 'MINVO')).toBe(true);
 
       // Stage 7 trap: 8 PASS
+      engine.clearAll();
       const wave7 = engine.spawnTrapWave(7, 8, 4);
       expect(wave7).toHaveLength(8);
       expect(wave7.every((e) => e.type === 'PASS')).toBe(true);
 
       // Stage 10 trap: 8 PONTAN
+      engine.clearAll();
       const wave10 = engine.spawnTrapWave(10, 15, 7);
       expect(wave10).toHaveLength(8);
       expect(wave10.every((e) => e.type === 'PONTAN')).toBe(true);
@@ -864,6 +963,117 @@ describe('Enemy Subsystem & Artificial Intelligence (Unit Test Suite)', () => {
 
       // Trapped: never penetrates either bomb tile
       expect(enemy.x).toBe(48.0);
+    });
+
+    it('never phases through a SOFT_BLOCK when trapped by a newly planted bomb', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      player.stats.maxBombs = 5;
+
+      // Configure layout:
+      // (2, 1): SOFT_BLOCK
+      // (3, 1): EMPTY
+      // (3, 0): HARD_WALL (border)
+      // (3, 2): HARD_WALL (pillar)
+      // (4, 1): Active bomb
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+      grid.setTile(4, 1, TileType.EMPTY);
+      grid.setTile(6, 1, TileType.EMPTY);
+
+      const bomb = ordinance.placeBomb(4, 1, player, grid);
+      expect(bomb).not.toBeNull();
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) -> (48.0, 16.0) moving RIGHT towards the bomb at (4, 1)
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      // Run 60 ticks of engine.update
+      for (let tick = 0; tick < 60; tick++) {
+        engine.update(16.666, player, grid, ordinance);
+
+        // Strict assertions on every tick: enemy.x is NEVER < 48 and NEVER > 48
+        expect(enemy.x).not.toBeLessThan(48.0);
+        expect(enemy.x).not.toBeGreaterThan(48.0);
+        expect(enemy.x).toBe(48.0);
+        expect(enemy.y).toBe(16.0);
+      }
+    });
+
+    it('never phases through a SOFT_BLOCK when trapped by a newly planted bomb mid-tile (x = 52)', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      player.stats.maxBombs = 5;
+
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+      grid.setTile(4, 1, TileType.EMPTY);
+      grid.setTile(6, 1, TileType.EMPTY);
+
+      const bomb = ordinance.placeBomb(4, 1, player, grid);
+      expect(bomb).not.toBeNull();
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      // Position enemy at tile (3, 1) mid-tile (52.0, 16.0) moving RIGHT towards bomb at (4, 1)
+      enemy.x = 52.0;
+      enemy.y = 16.0;
+      enemy.direction = 'RIGHT';
+
+      for (let tick = 0; tick < 60; tick++) {
+        engine.update(16.666, player, grid, ordinance);
+
+        // From tick 1 onward, enemy snaps to 48.0 and never phases through
+        expect(enemy.x).not.toBeLessThan(48.0);
+        expect(enemy.x).not.toBeGreaterThan(48.0);
+        expect(enemy.x).toBe(48.0);
+        expect(enemy.y).toBe(16.0);
+      }
+    });
+
+    it('Law 1: chooseNextDirection clamps position and enters Trapped State when validDirs.length === 0', () => {
+      const engine = createEnemiesEngine();
+      const grid = createStageGrid();
+      const player = createBomberman();
+      const ordinance = createOrdinanceEngine();
+
+      grid.setTile(3, 1, TileType.EMPTY);
+      grid.setTile(2, 1, TileType.SOFT_BLOCK);
+      grid.setTile(4, 1, TileType.HARD_WALL);
+      grid.setTile(3, 0, TileType.HARD_WALL);
+      grid.setTile(3, 2, TileType.HARD_WALL);
+
+      const enemy = engine.spawnEnemy('BALLOM', 6, 1, grid);
+      expect(enemy).not.toBeNull();
+      if (!enemy) return;
+
+      enemy.x = 48.0;
+      enemy.y = 16.0;
+      enemy.direction = 'LEFT';
+
+      engine.chooseNextDirection(enemy, player.centerTile, grid, ordinance);
+
+      expect(enemy.x).toBe(48.0);
+      expect(enemy.y).toBe(16.0);
+      expect(enemy.lastDecisionTx).toBe(-1);
+      expect(enemy.lastDecisionTy).toBe(-1);
     });
   });
 

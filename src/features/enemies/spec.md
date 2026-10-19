@@ -59,10 +59,17 @@ To reproduce the authentic safe opening feeling of NES Bomberman:
 
 ### 3.3 Canonical NES Punishment Mechanics: TIME = 0:00 (Pontan Horde) & Door/Powerup Trap
 
+#### 3.3.0 Límite Duro de Slots de Memoria en NES (`MAX_ACTIVE_ENEMIES = 10`)
+- En la arquitectura de la ROM de NES Bomberman (1985), la tabla de entidades en memoria RAM posee un tope estricto de **10 slots para enemigos**.
+- En ningún momento puede haber más de `MAX_ACTIVE_ENEMIES = 10` enemigos vivos (`state === 'ALIVE'`) simultáneamente en el nivel.
+- Cualquier generación dinámica (hordas de tiempo, trampas de puerta o power-up) trunca estrictamente su cuenta para jamás superar este límite.
+
 #### 3.3.1 Reloj en TIME = 0:00 (Horda Masiva de Pontans y Farming de Puntos)
 - Cuando el temporizador de la fase (`stageTimeRemaining`) desciende a `0`, el reloj se detiene en `0` y Bomberman **NO muere automáticamente** (`player.state === 'ALIVE'`).
 - Se activa la bandera `timeOutTriggered = true` (exactamente una sola vez por intento de nivel) y se invoca `enemies.spawnTimeOutHorde(grid, playerPos)`:
-  - Genera una horda masiva de **12 enemigos `PONTAN`** (monedas rotatorias de 8000 puntos base, con `wallpass: true` y velocidad `1.125 px/tick`).
+  - Llena los slots de memoria disponibles hasta alcanzar exactamente el límite de **`MAX_ACTIVE_ENEMIES = 10` enemigos activos en el mapa**:
+    $$\text{countToSpawn} = \max(0, \text{MAX\_ACTIVE\_ENEMIES} - \text{aliveCount})$$
+  - Si había 0 enemigos vivos al expirar el tiempo, nacen exactamente 10 `PONTAN`. Si quedaban por ejemplo 4 enemigos vivos, nacen únicamente 6 `PONTAN` (total 10 en el mapa). Si ya había 10 enemigos vivos, no se instancian nuevos.
   - Aparecen distribuidos en coordenadas válidas del mapa (incluyendo la casilla de la puerta si ha sido revelada y los bordes del mapa), respetando estrictamente una distancia Manhattan $\ge 5$ respecto a la posición actual de Bomberman (`playerPos`) para garantizar margen de reacción táctica.
   - El jugador puede maniobrar, esquivar y detonar bombas para destruir a los `PONTAN`, obteniendo 8000 puntos base por cada uno más los multiplicadores de combo simultáneo ($1\times, 2\times, 4\times, 8\times$).
   - Una vez que todos los enemigos son derrotados (`enemies.getAliveCount() === 0`), Bomberman puede ingresar libremente a la puerta de salida para ganar la fase (`STAGE_CLEARED`).
@@ -71,18 +78,24 @@ To reproduce the authentic safe opening feeling of NES Bomberman:
 - Cuando la llama de una explosión alcanza la casilla de una puerta revelada (`DOOR_REVEALED`):
   - La puerta **NO se destruye**.
   - Invoca `enemies.spawnTrapWave(stage, doorTx, doorTy)` -> `enemies.spawnFromTile(doorTx, doorTy, 8, enemyType)`.
-  - Nacen **desde la misma coordenada exacta $(tx, ty)$** exactamente **8 enemigos escalados según el Stage**:
-    - **Stage 1:** `8 ONEAL`
-    - **Stage 2:** `8 DAHL`
-    - **Stage 3:** `8 MINVO`
-    - **Stage 4:** `8 KONDORIA`
-    - **Stages 5–6:** `8 OVAPE`
-    - **Stages 7–9:** `8 PASS`
-    - **Stages 10+:** `8 PONTAN`
+  - Nacen **desde la misma coordenada exacta $(tx, ty)$** una cantidad de enemigos escalados según el Stage, limitada por la cuenta actual de enemigos vivos para no saturar el mapa ni superar el límite de 8 enemigos simultáneos:
+    $$\text{countToSpawn} = \max(0, \min(8, 8 - \text{aliveCount}))$$
+    - Si quedaban **0** enemigos vivos y se golpea la puerta/power-up: salen exactamente **8** enemigos desde $(tx, ty)$.
+    - Si quedaban **5** enemigos vivos: solo salen **3** nuevos (alcanzando exactamente el total de 8 en el mapa).
+    - Si quedaban **6** enemigos vivos: solo salen **2** nuevos (total 8 en el mapa, respetando el límite de 8 y el cap duro de `MAX_ACTIVE_ENEMIES = 10`).
+    - Si ya hay **8 o más** enemigos vivos: no nace ninguno adicional ($\text{countToSpawn} = 0$).
+  - Tipos escalados según el Stage:
+    - **Stage 1:** `ONEAL`
+    - **Stage 2:** `DAHL`
+    - **Stage 3:** `MINVO`
+    - **Stage 4:** `KONDORIA`
+    - **Stages 5–6:** `OVAPE`
+    - **Stages 7–9:** `PASS`
+    - **Stages 10+:** `PONTAN`
   - Los nuevos enemigos incrementan inmediatamente `aliveCount`, bloqueando la puerta de salida hasta que el jugador vuelva a eliminarlos a todos.
 - Cuando la llama alcanza un potenciador revelado (`POWERUP_REVEALED`):
   - El ítem se calcina y desaparece, transformando la casilla en `TileType.EMPTY`.
-  - También invoca `enemies.spawnTrapWave(stage, tx, ty)`, naciendo 8 enemigos escalados desde dicha coordenada $(tx, ty)$.
+  - También invoca `enemies.spawnTrapWave(stage, tx, ty)`, aplicando la misma fórmula de $\max(0, \min(8, 8 - \text{aliveCount}))$.
 
 #### 3.3.3 Inmunidad de Nacimiento en Trampas (`spawnImmunityMs = 520`)
 - Para evitar el exploit de que la misma explosión de $480\text{ ms}$ que detonó la trampa de la puerta o del power-up destruya instantáneamente a los 8 enemigos recién invocados en el mismo fotograma:
@@ -114,22 +127,39 @@ Enemies with fractional speeds (e.g., $0.5$, $0.75$, $0.25$, $1.5$) must never o
 - In each step with speed $s$:
   - If advancing by $s$ would cross a $16\text{px}$ boundary (e.g., $(pos + s) \ge (tile + 1) \times 16$ or $(pos - s) \le tile \times 16$), the movement snaps exactly to $tile \times 16$, and the intersection decision logic is executed.
 
-### 4.3 Obstacle Collision & Direction Fallback
+### 4.3 Obstacle Collision, Trapped State & Direction Decision (`chooseNextDirection`)
 A tile $(tx, ty)$ is impassable for an enemy if:
 1. `!grid.isInBounds(tx, ty)` $\implies$ Blocked.
 2. `grid.getTile(tx, ty) === TileType.HARD_WALL` $\implies$ Blocked.
 3. `grid.getTile(tx, ty)` is a soft block or burning block AND `enemy.hasWallpass === false` $\implies$ Blocked.
 4. An active solid bomb occupies tile $(tx, ty)$ $\implies$ Blocked.
 
-If an enemy faces an obstacle ahead at an intersection:
-- It eliminates the blocked direction from its candidate list.
-- If all forward and perpendicular directions are blocked, it reverses direction ($180^\circ$ turn).
+#### 4.3.1 Regla de Encierro Total (`Trapped State` cuando `validDirs.length === 0` - Ley 1)
+- En `chooseNextDirection()`, se evalúan las 4 direcciones cardinales con `canEnemyEnterTile(nx, ny, enemy, grid, bombs)`.
+- Si **ninguna** de las 4 direcciones es transitable (`validDirs.length === 0`, por ejemplo al estar encerrado entre pilares, un `SOFT_BLOCK` y una bomba recién plantada):
+  - El enemigo **NO puede avanzar en ninguna dirección**.
+  - Clava su posición en el origen de su casilla actual ($x = tx \times 16.0$, $y = ty \times 16.0$), manteniendo su desplazamiento de este tick en `0`.
+  - Fuerza `enemy.lastDecisionTx = -1; enemy.lastDecisionTy = -1;` para re-evaluar en el siguiente tick si la bomba explotó o si el camino se abrió.
+  - **PROHIBIDO** usar `reverseDir` a ciegas como fallback si `!canEnemyEnterTile(reverseTx, reverseTy)`. Solo se puede elegir `reverseDir` si realmente forma parte de `validDirs`.
 
-### 4.4 Immediate Bomb Rebound (Enclosure Mechanic)
-When a bomb is newly placed in front of an enemy moving towards tile $(targetTx, targetTy)$ (even mid-tile):
-- The enemy **CANNOT enter the bomb tile**.
-- It immediately snaps to the border of its current tile and reverses direction $180^\circ$ on that exact tick.
-- This allows the player to trap enemies between two bombs or between a bomb and a wall.
+#### 4.3.2 Guardia de Colisión Dura en el Borde Delantero en Cada Tick (`Hard Leading-Edge Collision Guard` - Ley 2)
+- Todo enemigo con `wallpass === false` **NUNCA** puede penetrar ni $0.1\text{px}$ dentro de un `SOFT_BLOCK`, `SOFT_BLOCK_WITH_DOOR`, `SOFT_BLOCK_WITH_POWERUP`, `BURNING_BLOCK`, `HARD_WALL` o bomba activa.
+- Antes de sumar o restar `speed` a `enemy.x` o `enemy.y` en cada tick, calcula la casilla que tocaría el borde delantero de su caja física de $16\times 16\text{px}$:
+  - `RIGHT`: `leadTx = Math.floor((enemy.x + step + 15.999) / 16)`, `leadTy = Math.floor((enemy.y + 8) / 16)`
+  - `LEFT`: `leadTx = Math.floor((enemy.x - step) / 16)`, `leadTy = Math.floor((enemy.y + 8) / 16)`
+  - `DOWN`: `leadTx = Math.floor((enemy.x + 8) / 16)`, `leadTy = Math.floor((enemy.y + step + 15.999) / 16)`
+  - `UP`: `leadTx = Math.floor((enemy.x + 8) / 16)`, `leadTy = Math.floor((enemy.y - step) / 16)`
+- Si $(leadTx \neq currentTx \lor leadTy \neq currentTy)$ y `!canEnemyEnterTile(leadTx, leadTy, enemy, grid, bombs)`:
+  - Cancela el avance hacia esa casilla.
+  - Clava de inmediato la posición del enemigo al origen de la casilla válida actual ($x = currentTx \times 16.0$ o $y = currentTy \times 16.0$).
+  - Resetea `enemy.lastDecisionTx = -1; enemy.lastDecisionTy = -1;` y llama de inmediato a la toma de decisión (`chooseNextDirection`). Si no hay salida, se queda inmóvil en el origen de la casilla.
+
+### 4.4 Immediate Bomb Rebound & Enclosure Mechanics (Ley 3)
+- Cuando una bomba es plantada frente a un enemigo que se mueve hacia la casilla $B$ (incluso a medio camino entre $A$ y $B$, con $x \pmod{16} \neq 0$ o $y \pmod{16} \neq 0$):
+  - El enemigo **CANNOT enter the bomb tile**.
+  - Al detectar la bomba, se clava de inmediato en el origen de la casilla actual $A$ ($tx_A \times 16.0, ty_A \times 16.0$).
+  - Invierte su orientación $180^\circ$ lejos de la bomba o ejecuta `chooseNextDirection` para verificar si detrás de $A$ hay un `SOFT_BLOCK` o pared antes de desplazarse.
+  - La Guardia de Borde Delantero garantiza que si detrás de $A$ hay un `SOFT_BLOCK` o muro indestructible, el enemigo jamás atravesará el bloque, quedando herméticamente atrapado.
 
 ### 4.5 AI State Tracking Counters (`EnemyEntity` & `EnemySnapshot`)
 To reproduce authentic NES corridor sweeping without chaotic erratic turning:

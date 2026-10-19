@@ -12,10 +12,13 @@ import {
   EnemyEntity,
   EnemyType,
   IEnemiesEngine,
+  MAX_ACTIVE_ENEMIES,
   ONEAL_BURST_SPEED,
   SPAWN_EXCLUSION_MANHATTAN_DISTANCE,
   STAGE_SPAWN_INITIAL_MIN_DISTANCE,
 } from './types';
+
+export { MAX_ACTIVE_ENEMIES };
 
 /**
  * Authentic NES Bomberman (1985) Stage Enemy Rosters (Stages 1 to 50)
@@ -190,6 +193,11 @@ export class EnemiesEngine implements IEnemiesEngine {
     grid: IStageGridEngine,
     rng: () => number = this.defaultRng
   ): EnemyEntity | null {
+    // 0. Hard slot limit: maximum 10 living enemies simultaneously in NES memory
+    if (this.aliveCount >= MAX_ACTIVE_ENEMIES) {
+      return null;
+    }
+
     // 1. Safe spawn exclusion zone: Manhattan distance < 5 from player spawn (1, 1)
     const dist = Math.abs(tx - 1) + Math.abs(ty - 1);
     if (dist < SPAWN_EXCLUSION_MANHATTAN_DISTANCE) {
@@ -243,6 +251,8 @@ export class EnemiesEngine implements IEnemiesEngine {
       spawnImmunityMs: 0,
       tilesWalkedInCurrentDir: 0,
       reversalQuota: this.getRandomReversalQuota(type, rng),
+      lastDecisionTx: -1,
+      lastDecisionTy: -1,
     };
 
     this._enemies.push(enemy);
@@ -366,7 +376,9 @@ export class EnemiesEngine implements IEnemiesEngine {
       candidates[j] = temp;
     }
 
-    const count = Math.min(8, candidates.length);
+    const alive = this.getAliveCount();
+    const remainingSlots = Math.max(0, MAX_ACTIVE_ENEMIES - alive);
+    const count = Math.min(8, Math.min(candidates.length, remainingSlots));
     for (let i = 0; i < count; i++) {
       const { x, y } = candidates[i];
       const pontan = this.spawnEnemy('PONTAN', x, y, grid);
@@ -418,7 +430,8 @@ export class EnemiesEngine implements IEnemiesEngine {
 
     const spawned: EnemyEntity[] = [];
     const directions: EnemyDirection[] = ['RIGHT', 'UP', 'LEFT', 'DOWN'];
-    const targetCount = 12;
+    const aliveCount = this.getAliveCount();
+    const targetCount = Math.max(0, MAX_ACTIVE_ENEMIES - aliveCount);
 
     for (let i = 0; i < targetCount; i++) {
       if (candidates.length === 0) break;
@@ -439,6 +452,8 @@ export class EnemiesEngine implements IEnemiesEngine {
         spawnImmunityMs: 0,
         tilesWalkedInCurrentDir: 0,
         reversalQuota: this.getRandomReversalQuota('PONTAN', rng),
+        lastDecisionTx: -1,
+        lastDecisionTy: -1,
       };
 
       this._enemies.push(pontan);
@@ -466,12 +481,13 @@ export class EnemiesEngine implements IEnemiesEngine {
     rng: () => number = Math.random
   ): readonly EnemyEntity[] {
     const defaultTypes: EnemyType[] = ['ONEAL', 'MINVO', 'PONTAN'];
-    // 4 to 8 enemies if count is not specified
-    const numToSpawn = count ?? (Math.floor(rng() * 5) + 4);
+    const aliveCount = this.getAliveCount();
+    const desired = count !== undefined ? count : 8;
+    const countToSpawn = Math.max(0, Math.min(desired, 8 - aliveCount));
     const directions: EnemyDirection[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
 
     const spawned: EnemyEntity[] = [];
-    for (let i = 0; i < numToSpawn; i++) {
+    for (let i = 0; i < countToSpawn; i++) {
       const enemyType = type ?? defaultTypes[Math.floor(rng() * defaultTypes.length)];
       const dir = directions[i % directions.length];
 
@@ -489,6 +505,8 @@ export class EnemiesEngine implements IEnemiesEngine {
         spawnImmunityMs: 520,
         tilesWalkedInCurrentDir: 0,
         reversalQuota: this.getRandomReversalQuota(enemyType, rng),
+        lastDecisionTx: -1,
+        lastDecisionTy: -1,
       };
 
       this._enemies.push(enemy);
@@ -544,14 +562,21 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTy = Math.round(enemy.y / 16);
       if (ordinance.isBombAt(targetTx, targetTy)) {
         enemy.x = Math.floor(enemy.x / 16) * 16.0;
+        enemy.y = targetTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
         this.setEnemyDirection(enemy, 'LEFT', this.defaultRng);
         return;
       }
     } else if (enemy.direction === 'LEFT') {
-      const targetTx = Math.ceil(enemy.x / 16) - 1;
+      const currentTx = Math.floor((enemy.x + 16 - 0.0001) / 16);
+      const targetTx = currentTx - 1;
       const targetTy = Math.round(enemy.y / 16);
       if (ordinance.isBombAt(targetTx, targetTy)) {
-        enemy.x = Math.ceil(enemy.x / 16) * 16.0;
+        enemy.x = currentTx * 16.0;
+        enemy.y = targetTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
         this.setEnemyDirection(enemy, 'RIGHT', this.defaultRng);
         return;
       }
@@ -559,15 +584,22 @@ export class EnemiesEngine implements IEnemiesEngine {
       const targetTx = Math.round(enemy.x / 16);
       const targetTy = Math.floor(enemy.y / 16) + 1;
       if (ordinance.isBombAt(targetTx, targetTy)) {
+        enemy.x = targetTx * 16.0;
         enemy.y = Math.floor(enemy.y / 16) * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
         this.setEnemyDirection(enemy, 'UP', this.defaultRng);
         return;
       }
     } else if (enemy.direction === 'UP') {
       const targetTx = Math.round(enemy.x / 16);
-      const targetTy = Math.ceil(enemy.y / 16) - 1;
+      const currentTy = Math.floor((enemy.y + 16 - 0.0001) / 16);
+      const targetTy = currentTy - 1;
       if (ordinance.isBombAt(targetTx, targetTy)) {
-        enemy.y = Math.ceil(enemy.y / 16) * 16.0;
+        enemy.x = targetTx * 16.0;
+        enemy.y = currentTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
         this.setEnemyDirection(enemy, 'DOWN', this.defaultRng);
         return;
       }
@@ -599,8 +631,14 @@ export class EnemiesEngine implements IEnemiesEngine {
       const nextTx = tx + this.dirX(enemy.direction);
       const nextTy = ty + this.dirY(enemy.direction);
 
-      if (!this.canEnemyPassTile(nextTx, nextTy, enemy, grid, ordinance)) {
-        this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
+      if (!this.canEnemyEnterTile(nextTx, nextTy, enemy, grid, ordinance)) {
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
+      }
+
+      const checkNextTx = tx + this.dirX(enemy.direction);
+      const checkNextTy = ty + this.dirY(enemy.direction);
+      if (!this.canEnemyEnterTile(checkNextTx, checkNextTy, enemy, grid, ordinance)) {
+        return;
       }
     }
 
@@ -609,49 +647,115 @@ export class EnemiesEngine implements IEnemiesEngine {
 
     if (dir === 'RIGHT') {
       const currentTx = Math.floor(enemy.x / 16);
+      const currentTy = Math.floor((enemy.y + 8) / 16);
       const targetX = (currentTx + 1) * 16.0;
       const dist = targetX - enemy.x;
+      const step = Math.min(speed, Math.max(0, dist));
+      const leadTx = Math.floor((enemy.x + step + 15.999) / 16);
+      const leadTy = Math.floor((enemy.y + 8) / 16);
+
+      if (
+        (leadTx !== currentTx || leadTy !== currentTy) &&
+        !this.canEnemyEnterTile(leadTx, leadTy, enemy, grid, ordinance)
+      ) {
+        enemy.x = currentTx * 16.0;
+        enemy.y = currentTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
+        return;
+      }
 
       if (speed >= dist - 0.0001) {
         enemy.x = targetX;
         enemy.tilesWalkedInCurrentDir++;
-        this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.x += speed;
       }
     } else if (dir === 'LEFT') {
       const currentTx = Math.floor((enemy.x + 16 - 0.0001) / 16);
+      const currentTy = Math.floor((enemy.y + 8) / 16);
       const targetX = (currentTx - 1) * 16.0;
       const dist = enemy.x - targetX;
+      const step = Math.min(speed, Math.max(0, dist));
+      const leadTx = Math.floor((enemy.x - step) / 16);
+      const leadTy = Math.floor((enemy.y + 8) / 16);
+
+      if (
+        (leadTx !== currentTx || leadTy !== currentTy) &&
+        !this.canEnemyEnterTile(leadTx, leadTy, enemy, grid, ordinance)
+      ) {
+        const snapTx = Math.round(enemy.x / 16);
+        enemy.x = snapTx * 16.0;
+        enemy.y = currentTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
+        return;
+      }
 
       if (speed >= dist - 0.0001) {
         enemy.x = targetX;
         enemy.tilesWalkedInCurrentDir++;
-        this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.x -= speed;
       }
     } else if (dir === 'DOWN') {
+      const currentTx = Math.floor((enemy.x + 8) / 16);
       const currentTy = Math.floor(enemy.y / 16);
       const targetY = (currentTy + 1) * 16.0;
       const dist = targetY - enemy.y;
+      const step = Math.min(speed, Math.max(0, dist));
+      const leadTx = Math.floor((enemy.x + 8) / 16);
+      const leadTy = Math.floor((enemy.y + step + 15.999) / 16);
+
+      if (
+        (leadTx !== currentTx || leadTy !== currentTy) &&
+        !this.canEnemyEnterTile(leadTx, leadTy, enemy, grid, ordinance)
+      ) {
+        enemy.x = currentTx * 16.0;
+        enemy.y = currentTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
+        return;
+      }
 
       if (speed >= dist - 0.0001) {
         enemy.y = targetY;
         enemy.tilesWalkedInCurrentDir++;
-        this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.y += speed;
       }
     } else if (dir === 'UP') {
+      const currentTx = Math.floor((enemy.x + 8) / 16);
       const currentTy = Math.floor((enemy.y + 16 - 0.0001) / 16);
       const targetY = (currentTy - 1) * 16.0;
       const dist = enemy.y - targetY;
+      const step = Math.min(speed, Math.max(0, dist));
+      const leadTx = Math.floor((enemy.x + 8) / 16);
+      const leadTy = Math.floor((enemy.y - step) / 16);
+
+      if (
+        (leadTx !== currentTx || leadTy !== currentTy) &&
+        !this.canEnemyEnterTile(leadTx, leadTy, enemy, grid, ordinance)
+      ) {
+        const snapTy = Math.round(enemy.y / 16);
+        enemy.x = currentTx * 16.0;
+        enemy.y = snapTy * 16.0;
+        enemy.lastDecisionTx = -1;
+        enemy.lastDecisionTy = -1;
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
+        return;
+      }
 
       if (speed >= dist - 0.0001) {
         enemy.y = targetY;
         enemy.tilesWalkedInCurrentDir++;
-        this.evaluateTurnAtIntersection(enemy, playerTile, grid, ordinance);
+        this.chooseNextDirection(enemy, playerTile, grid, ordinance);
       } else {
         enemy.y -= speed;
       }
@@ -684,6 +788,16 @@ export class EnemiesEngine implements IEnemiesEngine {
     }
 
     return true;
+  }
+
+  public canEnemyEnterTile(
+    tx: number,
+    ty: number,
+    enemy: { hasWallpass: boolean },
+    grid: IStageGridEngine,
+    ordinance?: IOrdinanceEngine
+  ): boolean {
+    return this.canEnemyPassTile(tx, ty, enemy, grid, ordinance);
   }
 
   public hasLineOfSight(
@@ -1064,13 +1178,43 @@ export class EnemiesEngine implements IEnemiesEngine {
     }
   }
 
-  private evaluateTurnAtIntersection(
+  public chooseNextDirection(
     enemy: EnemyEntity,
     playerTile: { x: number; y: number },
     grid: IStageGridEngine,
-    ordinance: IOrdinanceEngine
+    ordinance?: IOrdinanceEngine,
+    rng: () => number = this.defaultRng
   ): void {
-    this.evaluateDecisionAtTile(enemy, playerTile, grid, ordinance, this.defaultRng);
+    const tx = Math.round(enemy.x / 16);
+    const ty = Math.round(enemy.y / 16);
+
+    const allDirs: EnemyDirection[] = ['UP', 'RIGHT', 'DOWN', 'LEFT'];
+    const validDirs = allDirs.filter((d) =>
+      this.canEnemyEnterTile(tx + this.dirX(d), ty + this.dirY(d), enemy, grid, ordinance)
+    );
+
+    // Law 1: Total Enclosure Rule (Trapped State when validDirs.length === 0)
+    if (validDirs.length === 0) {
+      enemy.x = tx * 16.0;
+      enemy.y = ty * 16.0;
+      enemy.lastDecisionTx = -1;
+      enemy.lastDecisionTy = -1;
+      return;
+    }
+
+    enemy.lastDecisionTx = tx;
+    enemy.lastDecisionTy = ty;
+
+    // Evaluate AI decision according to archetype rules
+    this.evaluateDecisionAtTile(enemy, playerTile, grid, ordinance, rng);
+
+    // Law 1: PROHIBITED to use reverseDir or invalid direction if not in validDirs
+    const nextTx = tx + this.dirX(enemy.direction);
+    const nextTy = ty + this.dirY(enemy.direction);
+    if (!this.canEnemyEnterTile(nextTx, nextTy, enemy, grid, ordinance)) {
+      const chosen = validDirs[Math.floor(rng() * validDirs.length)];
+      this.setEnemyDirection(enemy, chosen, rng);
+    }
   }
 
   public checkFlameCollisions(
