@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
-import type { HudShellProps, SessionData, SessionState } from './types';
+import type { ContinueStats, HudShellProps, SessionData, SessionState } from './types';
 
 export const NES_LOGICAL_WIDTH = 256;
 export const NES_LOGICAL_CANVAS_HEIGHT = 208; // Exact playfield height (13 rows * 16px)
@@ -17,8 +17,8 @@ export function emitSessionState(data: SessionData): void {
 }
 
 export function emitGameAction(
-  action: 'START_GAME' | 'STAGE_READY' | 'RESTART_TO_TITLE',
-  payload?: { stage?: number }
+  action: 'START_GAME' | 'STAGE_READY' | 'RESTART_TO_TITLE' | 'TOGGLE_MUTE' | 'TOGGLE_PAUSE',
+  payload?: { stage?: number; continueStats?: ContinueStats }
 ): void {
   window.dispatchEvent(new CustomEvent('nes-bomberman:action', { detail: { action, ...payload } }));
 }
@@ -30,6 +30,13 @@ export const HudShell: React.FC<HudShellProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [scaleMode, setScaleMode] = useState<ScaleMode>('fit');
   const [sessionState, setSessionState] = useState<SessionState>('TITLE_SCREEN');
+  const [isPaused, setIsPaused] = useState<boolean>(false);
+  const [isMuted, setIsMuted] = useState<boolean>(() => {
+    if (typeof localStorage !== 'undefined') {
+      return localStorage.getItem('nes_bomberman_muted') === 'true';
+    }
+    return false;
+  });
   const [currentStage, setCurrentStage] = useState<number>(1);
   const [titleSelection, setTitleSelection] = useState<'START' | 'CONTINUE'>('START');
   const [topScore, setTopScore] = useState<number>(() => {
@@ -62,12 +69,12 @@ export const HudShell: React.FC<HudShellProps> = ({
     return () => window.removeEventListener('nes-bomberman:hud', handleHudUpdate);
   }, [topScore]);
 
-  // Listen for session state changes triggered by engine (STAGE_INTRO, GAME_OVER, etc.)
+  // Listen for session state changes triggered by engine (STAGE_INTRO, GAME_OVER, PAUSE, etc.)
   useEffect(() => {
     const handleSessionChange = (e: Event) => {
       const customEvent = e as CustomEvent<SessionData>;
       if (customEvent.detail) {
-        const { state, stage, score } = customEvent.detail;
+        const { state, stage, score, isPaused: pausedFlag } = customEvent.detail;
         if (typeof stage === 'number') {
           setCurrentStage(stage);
           localStorage.setItem('nes_bomberman_stage', String(stage));
@@ -76,12 +83,77 @@ export const HudShell: React.FC<HudShellProps> = ({
           setTopScore(score);
           localStorage.setItem('nes_bomberman_top_score', String(score));
         }
+        if (typeof pausedFlag === 'boolean') {
+          setIsPaused(pausedFlag);
+        } else if (state !== 'PLAYING') {
+          setIsPaused(false);
+        }
         setSessionState(state);
       }
     };
     window.addEventListener('nes-bomberman:session', handleSessionChange);
     return () => window.removeEventListener('nes-bomberman:session', handleSessionChange);
   }, [topScore]);
+
+  // Listen for audio mute toggle events dispatched globally
+  useEffect(() => {
+    const handleMuteChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ isMuted: boolean }>;
+      if (customEvent.detail && typeof customEvent.detail.isMuted === 'boolean') {
+        setIsMuted(customEvent.detail.isMuted);
+      }
+    };
+    window.addEventListener('nes-bomberman:mute', handleMuteChange);
+    return () => window.removeEventListener('nes-bomberman:mute', handleMuteChange);
+  }, []);
+
+  const handleToggleMute = () => {
+    emitGameAction('TOGGLE_MUTE');
+  };
+
+  const getContinueData = (): (ContinueStats & { stage: number }) | null => {
+    try {
+      const saved = localStorage.getItem('nes_bomberman_continue');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (typeof parsed.stage === 'number') return parsed;
+      }
+    } catch {
+      // fallback
+    }
+    return null;
+  };
+
+  const handleStartGame = () => {
+    setIsPaused(false);
+    setCurrentStage(1);
+    setSessionState('STAGE_INTRO');
+    emitGameAction('START_GAME', { stage: 1 });
+  };
+
+  const handleContinueGame = () => {
+    setIsPaused(false);
+    const continueData = getContinueData();
+    if (continueData) {
+      setCurrentStage(continueData.stage);
+      setSessionState('STAGE_INTRO');
+      emitGameAction('START_GAME', {
+        stage: continueData.stage,
+        continueStats: {
+          maxBombs: continueData.maxBombs,
+          flameRange: continueData.flameRange,
+          hasSpeedUp: continueData.hasSpeedUp,
+          score: continueData.score,
+        },
+      });
+    } else {
+      const savedStage = parseInt(localStorage.getItem('nes_bomberman_stage') || '1', 10);
+      const stageToStart = savedStage > 0 ? savedStage : 1;
+      setCurrentStage(stageToStart);
+      setSessionState('STAGE_INTRO');
+      emitGameAction('START_GAME', { stage: stageToStart });
+    }
+  };
 
   // 2200ms STAGE_INTRO Timer
   useEffect(() => {
@@ -103,14 +175,11 @@ export const HudShell: React.FC<HudShellProps> = ({
           setTitleSelection((prev) => (prev === 'START' ? 'CONTINUE' : 'START'));
           e.preventDefault();
         } else if (e.code === 'Enter' || e.code === 'Space') {
-          let stageToStart = 1;
           if (titleSelection === 'CONTINUE') {
-            const savedStage = parseInt(localStorage.getItem('nes_bomberman_stage') || '1', 10);
-            stageToStart = savedStage > 0 ? savedStage : 1;
+            handleContinueGame();
+          } else {
+            handleStartGame();
           }
-          setCurrentStage(stageToStart);
-          setSessionState('STAGE_INTRO');
-          emitGameAction('START_GAME', { stage: stageToStart });
           e.preventDefault();
         }
       } else if (sessionState === 'GAME_OVER') {
@@ -171,25 +240,42 @@ export const HudShell: React.FC<HudShellProps> = ({
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center bg-neutral-950 p-2 sm:p-4 select-none">
-      {/* Scale Selector (Discrete UI outside playfield) */}
+      {/* Cabinet Controls: Scale & Mute (Discrete UI outside playfield) */}
       <nav
-        aria-label="Scale selector"
-        className="absolute top-3 right-4 z-20 flex items-center space-x-1.5 rounded bg-neutral-900/90 px-2 py-1 text-[10px] font-mono text-neutral-400 border border-neutral-800 shadow-md backdrop-blur-sm"
+        aria-label="Arcade cabinet controls"
+        className="absolute top-3 right-4 z-20 flex items-center space-x-2 rounded bg-neutral-900/90 px-2.5 py-1 text-[10px] font-mono text-neutral-400 border border-neutral-800 shadow-md backdrop-blur-sm"
       >
-        <span className="text-neutral-500 mr-1 hidden sm:inline">SCALE:</span>
-        {(['fit', '2x', '3x', '4x'] as const).map((mode) => (
-          <button
-            key={mode}
-            onClick={() => setScaleMode(mode)}
-            className={`rounded px-1.5 py-0.5 uppercase transition-colors ${
-              scaleMode === mode
-                ? 'bg-neutral-700 text-white font-bold'
-                : 'hover:text-neutral-200'
-            }`}
-          >
-            {mode}
-          </button>
-        ))}
+        <button
+          onClick={handleToggleMute}
+          title="Toggle Sound (M)"
+          className={`flex items-center space-x-1 rounded px-2 py-0.5 uppercase transition-colors cursor-pointer ${
+            isMuted
+              ? 'bg-red-950 text-red-400 border border-red-800 font-bold'
+              : 'hover:text-neutral-200 text-neutral-300'
+          }`}
+        >
+          <span>{isMuted ? '🔇 MUTED' : '🔊 SFX'}</span>
+          <span className="text-[9px] text-neutral-500 hidden sm:inline">(M)</span>
+        </button>
+
+        <div className="h-3 w-px bg-neutral-800" />
+
+        <div className="flex items-center space-x-1">
+          <span className="text-neutral-500 mr-1 hidden sm:inline">SCALE:</span>
+          {(['fit', '2x', '3x', '4x'] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => setScaleMode(mode)}
+              className={`rounded px-1.5 py-0.5 uppercase transition-colors cursor-pointer ${
+                scaleMode === mode
+                  ? 'bg-neutral-700 text-white font-bold'
+                  : 'hover:text-neutral-200'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
       </nav>
 
       {/* Unified NES Arcade Cabinet Container (Aspect Ratio 256:240 = 16:15) */}
@@ -252,11 +338,7 @@ export const HudShell: React.FC<HudShellProps> = ({
               <div className="flex flex-col space-y-2 text-xs sm:text-sm mb-4">
                 <button
                   type="button"
-                  onClick={() => {
-                    setCurrentStage(1);
-                    setSessionState('STAGE_INTRO');
-                    emitGameAction('START_GAME', { stage: 1 });
-                  }}
+                  onClick={handleStartGame}
                   className="flex items-center space-x-2 text-left cursor-pointer hover:text-yellow-400 focus:outline-none"
                 >
                   <span className={titleSelection === 'START' ? 'text-white' : 'opacity-0'}>►</span>
@@ -267,13 +349,7 @@ export const HudShell: React.FC<HudShellProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    const saved = parseInt(localStorage.getItem('nes_bomberman_stage') || '1', 10);
-                    const stg = saved > 0 ? saved : 1;
-                    setCurrentStage(stg);
-                    setSessionState('STAGE_INTRO');
-                    emitGameAction('START_GAME', { stage: stg });
-                  }}
+                  onClick={handleContinueGame}
                   className="flex items-center space-x-2 text-left cursor-pointer hover:text-yellow-400 focus:outline-none"
                 >
                   <span className={titleSelection === 'CONTINUE' ? 'text-white' : 'opacity-0'}>►</span>
@@ -287,6 +363,15 @@ export const HudShell: React.FC<HudShellProps> = ({
               <div className="text-[9px] sm:text-[10px] text-neutral-400 mb-1">
                 © 1985 HUDSON SOFT
               </div>
+            </div>
+          )}
+
+          {/* OVERLAY: PAUSE (Blinking Yellow Pixel Art) */}
+          {sessionState === 'PLAYING' && isPaused && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/40 font-[family-name:var(--font-nes)]">
+              <span className="text-base sm:text-lg md:text-xl font-bold tracking-widest text-[#f8b800] animate-pulse drop-shadow-[2px_2px_0px_#000000]">
+                PAUSE
+              </span>
             </div>
           )}
 

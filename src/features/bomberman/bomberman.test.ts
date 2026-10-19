@@ -279,5 +279,22 @@ describe('Bomberman Player Entity & Corner-Sliding (Unit Test Verification)', ()
       expect(player.y).toBe(16.0);
       expect(player.state).toBe('SPAWNING');
     });
+
+    it('supports custom initialStats for CONTINUE restoration (permanent upgrades + 3 lives)', () => {
+      const player = new BombermanEntity({
+        lives: 3,
+        score: 18500,
+        maxBombs: 3,
+        flameRange: 4,
+        hasSpeedUp: true,
+      });
+
+      expect(player.stats.lives).toBe(3);
+      expect(player.stats.score).toBe(18500);
+      expect(player.stats.maxBombs).toBe(3);
+      expect(player.stats.flameRange).toBe(4);
+      expect(player.stats.hasSpeedUp).toBe(true);
+      expect(player.stats.speed).toBe(1.0); // Automatically configured to SPEED_UP_SPEED
+    });
   });
 });

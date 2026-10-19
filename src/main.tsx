@@ -7,6 +7,7 @@ import {
   emitSessionState,
 } from './features/hud-shell';
 import type { GameActionEvent } from './features/hud-shell/types';
+import { createAudioEngine, IAudioEngine } from './core/audio';
 import { createGameLoop, IGameLoop } from './core/loop';
 import { createInputEngine, IInputEngine } from './core/input';
 import {
@@ -14,6 +15,7 @@ import {
   StageGridRenderer,
   calculateCameraX,
   IStageGridEngine,
+  TileType,
 } from './features/stage-grid';
 import {
   createBomberman,
@@ -41,6 +43,30 @@ if (!rootElement) {
   throw new Error('Failed to find root element');
 }
 
+// 8-Bit Synthesized Audio Subsystem singleton
+const audioEngine: IAudioEngine = createAudioEngine();
+
+function emitAudioMute(isMuted: boolean): void {
+  window.dispatchEvent(new CustomEvent('nes-bomberman:mute', { detail: { isMuted } }));
+}
+
+// Safe Web Audio unlock on initial user gesture (compliant with browser autoplay policies)
+const unlockAudio = () => {
+  audioEngine.unlock();
+};
+window.addEventListener('keydown', unlockAudio, { once: true });
+window.addEventListener('click', unlockAudio, { once: true });
+window.addEventListener('touchstart', unlockAudio, { once: true });
+
+// Global Mute toggle via 'M' key
+window.addEventListener('keydown', (e: KeyboardEvent) => {
+  if (e.code === 'KeyM') {
+    const isMuted = audioEngine.toggleMute();
+    emitAudioMute(isMuted);
+    e.preventDefault();
+  }
+});
+
 // Pure TypeScript engine singletons decoupled from React (The React/Canvas Wall)
 let gameLoop: IGameLoop | null = null;
 let inputEngine: IInputEngine | null = null;
@@ -67,24 +93,63 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
 
 // Session & Gameplay flags
 let isGameActive = false;
+let isPaused = false;
 let currentStage = 1;
 let stageTimeRemaining = 200;
 let timerAccumulatorMs = 0;
 let timeOutTriggered = false;
+
+// Per-stage one-shot SFX tracking flags
+let doorRevealedSoundPlayed = false;
+let enemiesClearedSoundPlayed = false;
+let playerDeathSoundPlayed = false;
 
 // Listen for session commands dispatched by HudShell
 window.addEventListener('nes-bomberman:action', (e: Event) => {
   const customEvent = e as CustomEvent<GameActionEvent>;
   if (!customEvent.detail) return;
 
-  const { action, stage } = customEvent.detail;
+  const { action, stage, continueStats } = customEvent.detail;
+
+  if (action === 'TOGGLE_MUTE') {
+    const isMuted = audioEngine.toggleMute();
+    emitAudioMute(isMuted);
+    return;
+  }
+
+  if (action === 'TOGGLE_PAUSE') {
+    if (isGameActive) {
+      isPaused = !isPaused;
+      audioEngine.playPause();
+      if (isPaused) {
+        audioEngine.stopAll();
+      }
+      emitSessionState({ state: 'PLAYING', isPaused });
+    }
+    return;
+  }
 
   if (action === 'START_GAME') {
     currentStage = stage ?? 1;
     isGameActive = false;
+    isPaused = false;
+    audioEngine.unlock();
+    audioEngine.playStageIntro();
 
-    // Reset player if starting from Stage 1
-    if (currentStage === 1 || !player) {
+    doorRevealedSoundPlayed = false;
+    enemiesClearedSoundPlayed = false;
+    playerDeathSoundPlayed = false;
+
+    // Support CONTINUE: restore permanent upgrades (bombs, flame, speed, score) with 3 lives
+    if (continueStats) {
+      player = createBomberman({
+        lives: 3,
+        score: continueStats.score ?? 0,
+        maxBombs: continueStats.maxBombs ?? 1,
+        flameRange: continueStats.flameRange ?? 1,
+        hasSpeedUp: continueStats.hasSpeedUp ?? false,
+      });
+    } else if (currentStage === 1 || !player) {
       player = createBomberman();
     } else {
       player.resetToSpawn();
@@ -107,8 +172,11 @@ window.addEventListener('nes-bomberman:action', (e: Event) => {
     });
   } else if (action === 'STAGE_READY') {
     isGameActive = true;
+    isPaused = false;
   } else if (action === 'RESTART_TO_TITLE') {
     isGameActive = false;
+    isPaused = false;
+    audioEngine.stopAll();
   }
 });
 
@@ -172,13 +240,18 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       // Sample physical keyboard state and calculate rising/falling edges
       inputEngine.update();
 
-      // Pause toggle
+      // Pause toggle (Enter / KeyP / Escape)
       if (inputEngine.isJustPressed('PAUSE')) {
-        if (gameLoop?.state === 'RUNNING') {
-          gameLoop.pause();
-        } else if (gameLoop?.state === 'PAUSED') {
-          gameLoop.resume();
+        isPaused = !isPaused;
+        audioEngine.playPause();
+        if (isPaused) {
+          audioEngine.stopAll();
         }
+        emitSessionState({ state: 'PLAYING', isPaused });
+        return;
+      }
+
+      if (isPaused) {
         return;
       }
 
@@ -201,22 +274,40 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       // Plant Bomb on Space / KeyX
       if (inputEngine.isJustPressed('BOMB')) {
         const center = player.centerTile;
-        ordinanceEngine.placeBomb(center.x, center.y, player, stageGrid);
+        const bomb = ordinanceEngine.placeBomb(center.x, center.y, player, stageGrid);
+        if (bomb) {
+          audioEngine.playPlaceBomb();
+        }
       }
 
       // Manual Detonator Trigger on KeyZ (when player has detonator powerup)
       if (inputEngine.isJustPressed('DETONATE') && player.stats.hasDetonator) {
+        const prevExp = ordinanceEngine.activeExplosions.length;
         ordinanceEngine.detonateOldestBomb(stageGrid, player);
+        if (ordinanceEngine.activeExplosions.length > prevExp) {
+          audioEngine.playExplosion();
+        }
       }
 
       // Resolve primary and secondary direction (NES zero-diagonal + corridor turning)
       const directions = inputEngine.getDirections();
 
       // Advance player physics with corner-sliding, anti-tunneling snap, and solid bomb collision
+      const prevPlayerX = player.x;
+      const prevPlayerY = player.y;
       player.update(fixedDeltaMs, directions, stageGrid, null, ordinanceEngine);
+      const moved =
+        Math.abs(player.x - prevPlayerX) + Math.abs(player.y - prevPlayerY) > 0.0001;
+      if (moved && player.state === 'ALIVE') {
+        audioEngine.playStep();
+      }
 
       // Advance ordinance (walk-off grace, fuse timers, explosions, and flame lethality)
+      const prevExplosions = ordinanceEngine.activeExplosions.length;
       ordinanceEngine.update(fixedDeltaMs, player, stageGrid);
+      if (ordinanceEngine.activeExplosions.length > prevExplosions) {
+        audioEngine.playExplosion();
+      }
 
       // Check if bomb flames struck DOOR_REVEALED or POWERUP_REVEALED (punishment spawn)
       if (ordinanceEngine.consumePendingPunishmentWaves() > 0) {
@@ -226,6 +317,15 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       // Advance stage timers (480ms soft block disintegration)
       stageGrid.update(fixedDeltaMs);
 
+      // Check if exit door was revealed by burning block completion
+      if (!doorRevealedSoundPlayed && stageGrid.doorIndex >= 0) {
+        const doorCoord = stageGrid.indexToCoord(stageGrid.doorIndex);
+        if (stageGrid.getTile(doorCoord.x, doorCoord.y) === TileType.DOOR_REVEALED) {
+          audioEngine.playDoorRevealed();
+          doorRevealedSoundPlayed = true;
+        }
+      }
+
       // Advance mystery power-up invulnerability timer
       powerupEngine.update(fixedDeltaMs, player);
 
@@ -233,6 +333,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       const collectedPowerup = powerupEngine.checkPowerupPickup(player, stageGrid);
       if (collectedPowerup) {
         emitHudUpdate({ score: player.stats.score });
+        audioEngine.playPowerup();
       }
 
       // Advance enemy AI, movement, and intersection turns
@@ -247,18 +348,54 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
         emitHudUpdate({ score: player.stats.score });
       }
 
+      // Check if all enemies were cleared in the stage
+      if (
+        !enemiesClearedSoundPlayed &&
+        enemiesEngine.aliveCount === 0 &&
+        enemiesEngine.activeEnemies.length > 0
+      ) {
+        audioEngine.playAllEnemiesCleared();
+        enemiesClearedSoundPlayed = true;
+      }
+
       // Check enemy lethality against Bomberman
       enemiesEngine.checkPlayerLethality(player);
+      if (player.state === 'DYING' && !playerDeathSoundPlayed) {
+        audioEngine.playPlayerDeath();
+        playerDeathSoundPlayed = true;
+      }
 
       // Check Stage Clear via Exit Door (requires aliveCount === 0)
       const enemiesRemaining = enemiesEngine.aliveCount;
       const doorResult = powerupEngine.checkDoorEntry(player, stageGrid, enemiesRemaining);
       if (doorResult && doorResult.type === 'STAGE_CLEARED') {
         isGameActive = false;
+        audioEngine.playStageClear();
+
         currentStage = powerupEngine.advanceStage();
+
+        // Save persistent progression to localStorage for CONTINUE
+        try {
+          const continueData = {
+            stage: currentStage,
+            maxBombs: player.stats.maxBombs,
+            flameRange: player.stats.flameRange,
+            hasSpeedUp: player.stats.hasSpeedUp,
+            score: player.stats.score,
+          };
+          localStorage.setItem('nes_bomberman_continue', JSON.stringify(continueData));
+          localStorage.setItem('nes_bomberman_stage', String(currentStage));
+        } catch {
+          // Safe fallback
+        }
+
+        doorRevealedSoundPlayed = false;
+        enemiesClearedSoundPlayed = false;
+        playerDeathSoundPlayed = false;
 
         // Trigger NES Stage Intro curtain
         emitSessionState({ state: 'STAGE_INTRO', stage: currentStage });
+        audioEngine.playStageIntro();
 
         // Setup next stage
         stageGrid = createStageGrid();
@@ -281,6 +418,10 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
       if (player.state === 'DEAD') {
         isGameActive = false;
 
+        doorRevealedSoundPlayed = false;
+        enemiesClearedSoundPlayed = false;
+        playerDeathSoundPlayed = false;
+
         if (player.stats.lives > 0) {
           // Strip temporary equipment and retain permanent stats
           powerupEngine.handlePlayerDeath(player);
@@ -295,6 +436,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
 
           emitHudUpdate({ lives: player.stats.lives, time: stageTimeRemaining });
           emitSessionState({ state: 'STAGE_INTRO', stage: currentStage });
+          audioEngine.playStageIntro();
         } else {
           // No lives remaining: Game Over
           emitSessionState({ state: 'GAME_OVER', score: player.stats.score });
@@ -351,6 +493,7 @@ function handleCanvasMount(canvas: HTMLCanvasElement): () => void {
     gameLoop = null;
     inputEngine?.detach();
     inputEngine = null;
+    audioEngine.stopAll();
   };
 }
 

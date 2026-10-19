@@ -71,6 +71,15 @@ export class BombermanEntity implements IBombermanEntity {
     invincibleTimerMs: 0,
   };
 
+  constructor(initialStats?: Partial<PlayerStats>) {
+    if (initialStats) {
+      Object.assign(this.stats, initialStats);
+      if (initialStats.hasSpeedUp && !initialStats.speed) {
+        this.stats.speed = SPEED_UP_SPEED;
+      }
+    }
+  }
+
   public get state(): PlayerState {
     return this._state;
   }
@@ -360,6 +369,6 @@ export class BombermanEntity implements IBombermanEntity {
 /**
  * Factory helper for creating Bomberman entity.
  */
-export function createBomberman(): IBombermanEntity {
-  return new BombermanEntity();
+export function createBomberman(initialStats?: Partial<PlayerStats>): IBombermanEntity {
+  return new BombermanEntity(initialStats);
 }
